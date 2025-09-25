@@ -35,6 +35,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/pdps/{pdp}/skills.json', [PdpSkillController::class, 'index']);
     Route::post('/pdps/{pdp}/skills.json', [PdpSkillController::class, 'store']);
     Route::put('/pdps/{pdp}/skills/{skill}.json', [PdpSkillController::class, 'update']);
+    Route::patch('/pdps/{pdp}/skills/{skill}/criteria/{index}.json', [PdpSkillController::class, 'updateCriterionComment'])->whereNumber('index'); // legacy single comment support
+    Route::get('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress.json', [PdpSkillController::class, 'listProgress'])->whereNumber('index');
+    Route::post('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress.json', [PdpSkillController::class, 'addProgress'])->whereNumber('index');
+    Route::post('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}/approve.json', [PdpSkillController::class, 'approveProgress'])->whereNumber('index')->whereNumber('entry');
+    Route::delete('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}.json', [PdpSkillController::class, 'deleteProgress'])->whereNumber('index')->whereNumber('entry');
+
+    // Annex JSON (document-like view)
+    Route::get('/pdps/{pdp}/annex.json', [PdpSkillController::class, 'annex']);
+
     Route::delete('/pdps/{pdp}/skills/{skill}.json', [PdpSkillController::class, 'destroy']);
 });
 
