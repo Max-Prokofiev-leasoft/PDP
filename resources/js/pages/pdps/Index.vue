@@ -4,176 +4,16 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head } from '@inertiajs/vue3'
 import Heading from '@/components/Heading.vue'
-// jsPDF will be loaded on demand from CDN to avoid bundler resolution issues
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - dynamic global import
-let _jsPdfCtor: any = null;
-async function getJsPdfCtor(): Promise<any> {
-  if (typeof window !== 'undefined' && (window as any).jspdf?.jsPDF) {
-    return (window as any).jspdf.jsPDF
-  }
-  if (_jsPdfCtor) return _jsPdfCtor
-  await new Promise<void>((resolve, reject) => {
-    const id = 'jspdf-cdn-script'
-    if (document.getElementById(id)) {
-      ;(document.getElementById(id) as HTMLScriptElement).addEventListener('load', () => resolve())
-      return
-    }
-    const s = document.createElement('script')
-    s.id = id
-    s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
-    s.async = true
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load jsPDF'))
-    document.head.appendChild(s)
-  })
-  _jsPdfCtor = (window as any).jspdf?.jsPDF
-  if (!_jsPdfCtor) throw new Error('jsPDF not available after loading')
-  return _jsPdfCtor
-}
+import { getJsPdfCtor } from '@/composables/usePdfExport'
+import { ensurePdfUnicodeFont } from '@/utils/pdfFont'
+import { getLeaSoftLogoCircular } from '@/utils/images'
+import { formatKyivDateTime } from '@/utils/date'
+import { parseCriteriaItems } from '@/utils/criteria'
+import { statusBadgeClass } from '@/utils/status'
 
-// Load and register a Unicode font (with Cyrillic support) for jsPDF on-demand
-// Use static TTFs (Regular + Bold). Prefer DejaVu Sans (broad Unicode support) to avoid variable-font and glyph issues.
-let _pdfFontBase64Regular: string | null = null
-let _pdfFontBase64Bold: string | null = null
-const _pdfFontName = 'DejaVuSans'
-const _pdfFontStyle = 'normal'
-const _pdfFontFileRegular = 'DejaVuSans.ttf'
-const _pdfFontFileBold = 'DejaVuSans-Bold.ttf'
 
-// LeaSoft logo loader (cached)
-let _leaLogoTried = false
-let _leaLogoDataUrl: string | null = null
-async function getLeaSoftLogo(): Promise<string | null> {
-  if (_leaLogoTried) return _leaLogoDataUrl
-  _leaLogoTried = true
-  try {
-    const res = await fetch('/images/lea-soft.png', { cache: 'force-cache' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => reject(new Error('Failed to read logo blob'))
-      reader.readAsDataURL(blob)
-    })
-    _leaLogoDataUrl = dataUrl || null
-  } catch {
-    _leaLogoDataUrl = null
-  }
-  return _leaLogoDataUrl
-}
 
-// Return a circular-masked version of the LeaSoft logo as data URL (PNG)
-// Uses an offscreen canvas and caches by requested size.
-const _leaLogoCircularCache: Record<number, string> = {}
-async function getLeaSoftLogoCircular(size = 40): Promise<string | null> {
-  // Support native-resolution mode when size<=0
-  const cacheKey = (size && size > 0) ? size : 0
-  if (_leaLogoCircularCache[cacheKey]) return _leaLogoCircularCache[cacheKey]
-  const base = await getLeaSoftLogo()
-  if (!base) return null
-  try {
-    const img: HTMLImageElement = await new Promise((resolve, reject) => {
-      const im = new Image()
-      im.onload = () => resolve(im)
-      im.onerror = () => reject(new Error('Failed to load logo image'))
-      im.src = base
-    })
 
-    // Determine canvas size: native or fixed square
-    const useNative = !(size && size > 0)
-    const canW = useNative ? img.width : size
-    const canH = useNative ? img.height : size
-
-    const canvas = document.createElement('canvas')
-    canvas.width = canW
-    canvas.height = canH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return base // fallback to original
-
-    // Clip to circle (use min dimension)
-    const diam = Math.min(canW, canH)
-    const cx = canW / 2
-    const cy = canH / 2
-    ctx.clearRect(0, 0, canW, canH)
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(cx, cy, diam / 2, 0, Math.PI * 2)
-    ctx.closePath()
-    ctx.clip()
-
-    // Draw the image with object-fit: cover behavior
-    const scale = Math.max(diam / img.width, diam / img.height)
-    const drawW = img.width * scale
-    const drawH = img.height * scale
-    const dx = cx - drawW / 2
-    const dy = cy - drawH / 2
-    ctx.drawImage(img, dx, dy, drawW, drawH)
-    ctx.restore()
-
-    const out = canvas.toDataURL('image/png')
-    _leaLogoCircularCache[cacheKey] = out
-    return out
-  } catch {
-    return base
-  }
-}
-
-async function ensurePdfUnicodeFont(doc: any): Promise<void> {
-  // Avoid re-registering for the same document instance
-  if ((doc as any).__pdpFontLoaded) return
-
-  const fetchAsBase64 = async (url: string) => {
-    const res = await fetch(url, { cache: 'force-cache' })
-    if (!res.ok) throw new Error(`Failed to fetch font: ${res.status}`)
-    const buf = await res.arrayBuffer()
-    let binary = ''
-    const bytes = new Uint8Array(buf)
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-    return btoa(binary)
-  }
-
-  try {
-    if (!_pdfFontBase64Regular) {
-      _pdfFontBase64Regular = await fetchAsBase64('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/DejaVuSans.ttf')
-    }
-    if (!_pdfFontBase64Bold) {
-      _pdfFontBase64Bold = await fetchAsBase64('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/DejaVuSans-Bold.ttf')
-    }
-
-    doc.addFileToVFS(_pdfFontFileRegular, _pdfFontBase64Regular)
-    doc.addFileToVFS(_pdfFontFileBold, _pdfFontBase64Bold)
-    doc.addFont(_pdfFontFileRegular, _pdfFontName, 'normal')
-    doc.addFont(_pdfFontFileBold, _pdfFontName, 'bold')
-    doc.setFont(_pdfFontName, _pdfFontStyle)
-    ;(doc as any).__pdpFontLoaded = true
-  } catch {
-    // Fallback silently to default font if loading fails
-    // But still try to set Helvetica to keep consistent sizing
-    try { doc.setFont('helvetica', 'normal') } catch {}
-  }
-}
-
-// Date-time formatting helper (Kyiv timezone)
-function formatKyivDateTime(input?: string | number | Date): string {
-  if (!input) return ''
-  const d = new Date(input)
-  if (isNaN(d.getTime())) return ''
-  // Build parts to ensure YYYY-MM-DD HH:mm
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Kyiv',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`
-}
 
 // Types
 export type Pdp = {
@@ -269,30 +109,6 @@ const criteriaTextInput = ref('')
 const criteriaCommentInput = ref('')
 const criteriaItems = ref<CriteriaItem[]>([])
 
-function parseCriteriaItems(text?: string): CriteriaItem[] {
-  if (!text) return []
-  // Try JSON first (new format)
-  try {
-    const parsed = JSON.parse(text)
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((x: any) =>
-          typeof x === 'string'
-            ? { text: x, done: false }
-            : { text: String(x?.text ?? '').trim(), comment: x?.comment != null && String(x.comment).trim() !== '' ? String(x.comment) : undefined, done: Boolean(x?.done) }
-        )
-        .filter((i: CriteriaItem) => i.text)
-    }
-  } catch {
-    // ignore and try legacy
-  }
-  // Legacy: split by new lines or commas/semicolons -> text only
-  return text
-    .split(/[\n,;]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(t => ({ text: t }))
-}
 
 function resetCriteriaState(fromText: string = '') {
   criteriaItems.value = parseCriteriaItems(fromText)
@@ -857,18 +673,6 @@ onMounted(async () => {
     }
   }
 })
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'Done':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-    case 'In Progress':
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-    case 'Blocked':
-      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-    default: // Planned or any other
-      return 'bg-muted text-muted-foreground'
-  }
-}
 
 </script>
 
