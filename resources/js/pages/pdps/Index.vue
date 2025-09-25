@@ -29,7 +29,7 @@ export type PdpSkill = {
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
-  { title: 'PDP list', href: '/pdps' },
+  { title: 'PDP List', href: '/pdps' },
 ]
 
 // State
@@ -162,7 +162,7 @@ onMounted(() => {
 
   <AppLayout :breadcrumbs="breadcrumbs">
     <div class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4">
-      <Heading title="PDP list" description="PDP — це план, який містить список скілів/задач для досягнення." />
+      <Heading title="PDP List" description="PDP — це план, який містить список скілів/задач для досягнення." />
 
       <div class="flex flex-col gap-4">
         <!-- PDP list (top) -->
@@ -232,7 +232,7 @@ onMounted(() => {
             </div>
             <p v-else class="text-sm text-muted-foreground">Немає скілів у цьому PDP. Додайте перший.</p>
           </template>
-          <p v-else class="text-sm text-muted-foreground">Оберіть PDP ліворуч, щоб переглянути його скіли.</p>
+          <p v-else class="text-sm text-muted-foreground">Оберіть PDP, щоб переглянути його скіли.</p>
         </div>
       </div>
 

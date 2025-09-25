@@ -24,7 +24,7 @@ const mainNavItems: NavItem[] = [
         icon: LayoutGrid,
     },
     {
-        title: 'PDP list',
+        title: 'PDP List',
         href: '/pdps',
         icon: List,
     },
