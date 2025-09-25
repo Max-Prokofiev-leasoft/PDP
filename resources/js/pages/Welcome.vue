@@ -52,8 +52,8 @@ import ThemeToggle from '@/components/ThemeToggle.vue';
                 >
                     <h1 class="mb-1 font-medium">PDP Tracker</h1>
                     <p class="mb-2 text-[#706f6c] dark:text-[#A1A09A]">
-                        Трекер індивідуальних планів розвитку. <br />
-                        Відстежуйте цілі, прогрес і результати вашого PDP.
+                        Individual Development Plan tracker. <br />
+                        Track goals, progress, and results of your PDP.
                     </p>
                 </div>
                 <div

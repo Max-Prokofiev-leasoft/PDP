@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head } from '@inertiajs/vue3'
@@ -40,6 +40,85 @@ const _pdfFontName = 'DejaVuSans'
 const _pdfFontStyle = 'normal'
 const _pdfFontFileRegular = 'DejaVuSans.ttf'
 const _pdfFontFileBold = 'DejaVuSans-Bold.ttf'
+
+// LeaSoft logo loader (cached)
+let _leaLogoTried = false
+let _leaLogoDataUrl: string | null = null
+async function getLeaSoftLogo(): Promise<string | null> {
+  if (_leaLogoTried) return _leaLogoDataUrl
+  _leaLogoTried = true
+  try {
+    const res = await fetch('/images/lea-soft.png', { cache: 'force-cache' })
+    if (!res.ok) return null
+    const blob = await res.blob()
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('Failed to read logo blob'))
+      reader.readAsDataURL(blob)
+    })
+    _leaLogoDataUrl = dataUrl || null
+  } catch {
+    _leaLogoDataUrl = null
+  }
+  return _leaLogoDataUrl
+}
+
+// Return a circular-masked version of the LeaSoft logo as data URL (PNG)
+// Uses an offscreen canvas and caches by requested size.
+const _leaLogoCircularCache: Record<number, string> = {}
+async function getLeaSoftLogoCircular(size = 40): Promise<string | null> {
+  // Support native-resolution mode when size<=0
+  const cacheKey = (size && size > 0) ? size : 0
+  if (_leaLogoCircularCache[cacheKey]) return _leaLogoCircularCache[cacheKey]
+  const base = await getLeaSoftLogo()
+  if (!base) return null
+  try {
+    const img: HTMLImageElement = await new Promise((resolve, reject) => {
+      const im = new Image()
+      im.onload = () => resolve(im)
+      im.onerror = () => reject(new Error('Failed to load logo image'))
+      im.src = base
+    })
+
+    // Determine canvas size: native or fixed square
+    const useNative = !(size && size > 0)
+    const canW = useNative ? img.width : size
+    const canH = useNative ? img.height : size
+
+    const canvas = document.createElement('canvas')
+    canvas.width = canW
+    canvas.height = canH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return base // fallback to original
+
+    // Clip to circle (use min dimension)
+    const diam = Math.min(canW, canH)
+    const cx = canW / 2
+    const cy = canH / 2
+    ctx.clearRect(0, 0, canW, canH)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, diam / 2, 0, Math.PI * 2)
+    ctx.closePath()
+    ctx.clip()
+
+    // Draw the image with object-fit: cover behavior
+    const scale = Math.max(diam / img.width, diam / img.height)
+    const drawW = img.width * scale
+    const drawH = img.height * scale
+    const dx = cx - drawW / 2
+    const dy = cy - drawH / 2
+    ctx.drawImage(img, dx, dy, drawW, drawH)
+    ctx.restore()
+
+    const out = canvas.toDataURL('image/png')
+    _leaLogoCircularCache[cacheKey] = out
+    return out
+  } catch {
+    return base
+  }
+}
 
 async function ensurePdfUnicodeFont(doc: any): Promise<void> {
   // Avoid re-registering for the same document instance
@@ -105,6 +184,7 @@ export type Pdp = {
   eta?: string
   status: 'Planned' | 'In Progress' | 'Done' | 'Blocked'
   skills_count?: number
+  user?: { id: number; name?: string; email: string }
 }
 
 export type PdpSkill = {
@@ -119,14 +199,55 @@ export type PdpSkill = {
   order_column?: number
 }
 
+interface Curator { id: number; name?: string; email: string }
+
 const breadcrumbsItems = computed<BreadcrumbItem[]>(() => [
   { title: activeTab.value === 'Annex' ? 'Annex' : 'PDP List', href: activeTab.value === 'Annex' ? '/pdps?tab=annex' : '/pdps' },
 ])
 
 // State
 const pdps = ref<Pdp[]>([])
+const importInputRef = ref<HTMLInputElement | null>(null)
+function triggerImport() { importInputRef.value?.click() }
+async function onImportFileChange(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input?.files && input.files[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const payload = JSON.parse(text)
+    const created = await http('/pdps/import.json', { method: 'POST', body: JSON.stringify(payload) })
+    await loadPdps()
+    if (created?.id) {
+      selectedPdpId.value = created.id
+      await loadSkills(created.id)
+    }
+    alert('PDP imported successfully')
+  } catch (e: any) {
+    alert('Import failed: ' + (e?.message || 'Error'))
+  } finally {
+    if (input) input.value = ''
+  }
+}
+const sharedPdps = ref<Pdp[]>([])
 const selectedPdpId = ref<number | null>(null)
 const skills = ref<PdpSkill[]>([])
+const curators = ref<Curator[]>([])
+
+// Collapsible sections state
+const collapseOwned = ref(false)
+const collapseShared = ref(false)
+
+try {
+  // Restore from localStorage
+  const co = localStorage.getItem('pdp.collapseOwned')
+  const cs = localStorage.getItem('pdp.collapseShared')
+  collapseOwned.value = co === '1'
+  collapseShared.value = cs === '1'
+} catch {}
+
+watch(collapseOwned, v => { try { localStorage.setItem('pdp.collapseOwned', v ? '1' : '0') } catch {} })
+watch(collapseShared, v => { try { localStorage.setItem('pdp.collapseShared', v ? '1' : '0') } catch {} })
 
 // Tabs
 const activeTab = ref<'Manage' | 'Annex'>('Manage')
@@ -143,7 +264,7 @@ const editingSkillId = ref<number | null>(null)
 const skillForm = reactive<PdpSkill>({ id: 0, pdp_id: 0, skill: '', description: '', criteria: '', priority: 'Medium', eta: '', status: 'Planned' })
 
 // Win Criteria helpers with per-item comments (stored as JSON in criteria string with legacy fallback)
-interface CriteriaItem { text: string; comment?: string }
+interface CriteriaItem { text: string; comment?: string; done?: boolean }
 const criteriaTextInput = ref('')
 const criteriaCommentInput = ref('')
 const criteriaItems = ref<CriteriaItem[]>([])
@@ -157,8 +278,8 @@ function parseCriteriaItems(text?: string): CriteriaItem[] {
       return parsed
         .map((x: any) =>
           typeof x === 'string'
-            ? { text: x }
-            : { text: String(x?.text ?? '').trim(), comment: x?.comment != null && String(x.comment).trim() !== '' ? String(x.comment) : undefined }
+            ? { text: x, done: false }
+            : { text: String(x?.text ?? '').trim(), comment: x?.comment != null && String(x.comment).trim() !== '' ? String(x.comment) : undefined, done: Boolean(x?.done) }
         )
         .filter((i: CriteriaItem) => i.text)
     }
@@ -250,6 +371,18 @@ async function deleteProgressEntry(id: number) {
   }
 }
 
+async function toggleCriterionDone(s: PdpSkill, index: number, done: boolean) {
+  try {
+    await http(`/pdps/${s.pdp_id}/skills/${s.id}/criteria/${index}/done.json`, {
+      method: 'PATCH',
+      body: JSON.stringify({ done })
+    })
+    if (selectedPdpId.value) await loadSkills(selectedPdpId.value)
+  } catch (e: any) {
+    alert('Failed to update criterion state: ' + (e?.message || 'Error'))
+  }
+}
+
 async function approveProgressEntry(id: number) {
   try {
     await http(`/pdps/${progressState.pdp_id}/skills/${progressState.skill_id}/criteria/${progressState.index}/progress/${id}/approve.json`, {
@@ -261,14 +394,23 @@ async function approveProgressEntry(id: number) {
   }
 }
 
-const csrf = () => (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement | null)?.content || ''
+const xsrf = () => {
+  try {
+    const m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/)
+    return m ? decodeURIComponent(m[1]) : ''
+  } catch {
+    return ''
+  }
+}
 
 // Helpers
 async function http(url: string, options: RequestInit = {}) {
+  const isGet = !options.method || options.method.toUpperCase() === 'GET'
   const headers: HeadersInit = {
     'Accept': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
-    ...(options.method && options.method !== 'GET' ? { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrf() } : {}),
+    // Rely solely on X-XSRF-TOKEN (cookie-based) to avoid stale meta token mismatches
+    ...(!isGet ? { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': xsrf() } : {}),
     ...(options.headers || {}),
   }
   const res = await fetch(url, { credentials: 'same-origin', ...options, headers })
@@ -283,13 +425,26 @@ async function http(url: string, options: RequestInit = {}) {
 // Loaders
 async function loadPdps() {
   pdps.value = await http('/pdps.json')
-  if (pdps.value.length && !selectedPdpId.value) {
-    selectPdp(pdps.value[0].id)
+}
+
+async function loadSharedPdps() {
+  try {
+    sharedPdps.value = await http('/pdps.shared.json')
+  } catch {
+    sharedPdps.value = []
   }
 }
 
 async function loadSkills(pdpId: number) {
   skills.value = await http(`/pdps/${pdpId}/skills.json`)
+}
+
+async function loadCurators(pdpId: number) {
+  try {
+    curators.value = await http(`/pdps/${pdpId}/curators.json`)
+  } catch {
+    curators.value = []
+  }
 }
 
 async function loadAnnex(pdpId: number) {
@@ -300,6 +455,25 @@ async function loadAnnex(pdpId: number) {
 
 function filenameSafe(input: string): string {
   return (input || 'PDP').replace(/[^\w\-\s]+/g, '').replace(/\s+/g, '_').slice(0, 60)
+}
+
+async function downloadPdpTemplate() {
+  if (!selectedPdpId.value || !selectedPdp.value) return
+  try {
+    const data = await http(`/pdps/${selectedPdpId.value}/export.json`)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const name = `PDP_Template_${filenameSafe(selectedPdp.value.title)}.json`
+    a.href = url
+    a.download = name
+    document.body.appendChild(a)
+    a.click()
+    URL.revokeObjectURL(url)
+    a.remove()
+  } catch (e: any) {
+    alert('Failed to export PDP: ' + (e?.message || 'Error'))
+  }
 }
 
 // Build a PDF document for the current Annex data (using jsPDF)
@@ -354,19 +528,68 @@ async function buildAnnexPdf(JsPDFCtor: any, data: any) {
   if (!data) return doc
   const pdp = data.pdp || {}
 
-  // Title and meta
-  addHeading(`Annex — ${pdp.title || 'PDP'}`, 1)
+  // Modern header with logo, owner, curators
+  const headerHeight = 70
+  ensureSpace(headerHeight)
+  // Company logo from public/images (fallback to simple circle if missing)
+  try {
+    const logo = await getLeaSoftLogoCircular(0)
+    if (logo) {
+      // Draw the circular logo 40x40 at the left; keep title offset at +48 to align
+      doc.addImage(logo, 'PNG', margin, y, 40, 40)
+    } else {
+      doc.setFillColor(28, 100, 242)
+      doc.circle(margin + 20, y + 20, 14, 'F')
+      setFontSafe(true)
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(12)
+      doc.text('P', margin + 20 - 3.5, y + 24)
+      doc.setTextColor(0, 0, 0)
+    }
+  } catch {
+    try {
+      doc.setFillColor(28, 100, 242)
+      doc.circle(margin + 20, y + 20, 14, 'F')
+      setFontSafe(true)
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(12)
+      doc.text('P', margin + 20 - 3.5, y + 24)
+      doc.setTextColor(0, 0, 0)
+    } catch {}
+  }
+
+  // Title
+  setFontSafe(true)
+  doc.setFontSize(18)
+  doc.text(`Annex — ${pdp.title || 'PDP'}`, margin + 48, y + 8)
+
+  // Meta + owner/curators under title
+  setFontSafe(false)
+  doc.setFontSize(11)
   const meta: string[] = []
   if (pdp.status) meta.push(`Status: ${pdp.status}`)
   if (pdp.priority) meta.push(`Priority: ${pdp.priority}`)
   if (pdp.eta) meta.push(`ETA: ${pdp.eta}`)
-  if (meta.length) addText(meta.join(' · '))
+  const owner = (data && data.owner) || (selectedPdp?.value as any)?.user || null
+  const ownerLine = owner ? `Owner: ${owner.name || owner.email || '—'}` : (selectedPdpIsOwner.value ? 'Owner: You' : '')
+  const curatorsList = Array.isArray((data && data.curators)) ? (data.curators as any[]) : curators.value
+  const curatorsLine = curatorsList && curatorsList.length ? `Curators: ${curatorsList.map((c:any)=>c.name || c.email).join(', ')}` : ''
+  const metaLine = meta.join(' · ')
+  const infoCombined = [metaLine, ownerLine, curatorsLine].filter(Boolean).join('  |  ')
+  const lines = doc.splitTextToSize(infoCombined, contentWidth - 48)
+  let infoY = y + 26
+  for (const ln of lines) {
+    ensureSpace(14)
+    doc.text(ln, margin + 48, infoY)
+    infoY += 14
+  }
+  y = infoY + 6
   if (pdp.description) addText(String(pdp.description))
   addSpacer(6)
 
   const skills = Array.isArray(data.skills) ? data.skills : []
   if (!skills.length) {
-    addText('В PDP немає скілів.')
+    addText('There are no skills in this PDP.')
     return doc
   }
 
@@ -389,7 +612,7 @@ async function buildAnnexPdf(JsPDFCtor: any, data: any) {
         if (e.note) addText(String(e.note), 11, false, 6)
       }
     }
-    if (!anyEntries) addText('Немає апрувнутих записів.', 12, false, 6)
+    if (!anyEntries) addText('No approved entries.', 12, false, 6)
     addSpacer(6)
   }
 
@@ -402,7 +625,12 @@ async function downloadCurrentPdpAnnex() {
     await loadAnnex(selectedPdpId.value)
   }
   const JsPDFCtor = await getJsPdfCtor()
-  const doc = await buildAnnexPdf(JsPDFCtor, annex.value)
+  // Ensure curators loaded for owner case
+  if (selectedPdpIsOwner.value && selectedPdpId.value && curators.value.length === 0) {
+    try { await loadCurators(selectedPdpId.value) } catch {}
+  }
+  const payload = { ...(annex.value || {}), owner: (selectedPdp.value as any)?.user || (selectedPdpIsOwner.value ? { name: 'You' } : null), curators: curators.value }
+  const doc = await buildAnnexPdf(JsPDFCtor, payload)
   const now = new Date()
   const yyyy = now.getFullYear()
   const mm = String(now.getMonth()+1).padStart(2,'0')
@@ -415,6 +643,12 @@ async function downloadCurrentPdpAnnex() {
 
 function selectPdp(id: number) {
   selectedPdpId.value = id
+  // Load curators only for owned PDPs
+  if (pdps.value.some(p => p.id === id)) {
+    loadCurators(id)
+  } else {
+    curators.value = []
+  }
   if (activeTab.value === 'Manage') {
     loadSkills(id)
   } else {
@@ -501,16 +735,144 @@ async function deleteSkill(id: number) {
 }
 
 const hasPdps = computed(() => pdps.value.length > 0)
-const selectedPdp = computed(() => pdps.value.find(p => p.id === selectedPdpId.value) || null)
+const hasSharedPdps = computed(() => sharedPdps.value.length > 0)
+const selectedPdp = computed(() => {
+  const id = selectedPdpId.value
+  if (!id) return null
+  return pdps.value.find(p => p.id === id) || sharedPdps.value.find(p => p.id === id) || null
+})
+const selectedPdpIsOwner = computed(() => {
+  const id = selectedPdpId.value
+  if (!id) return false
+  return pdps.value.some(p => p.id === id)
+})
+const selectedPdpIsCurator = computed(() => {
+  const id = selectedPdpId.value
+  if (!id) return false
+  return sharedPdps.value.some(p => p.id === id)
+})
+const selectedPdpIsEditable = computed(() => selectedPdpIsOwner.value || selectedPdpIsCurator.value)
 
-onMounted(() => {
+function selectPdpFromShared(id: number) {
+  selectedPdpId.value = id
+  curators.value = []
+  if (activeTab.value === 'Manage') {
+    loadSkills(id)
+  } else {
+    loadAnnex(id)
+  }
+}
+
+const curatorEmail = ref('')
+const userSearch = ref('')
+const userOptions = ref<Curator[]>([])
+const showUserDropdown = ref(false)
+let userSearchTimer: number | null = null
+
+watch(curatorEmail, (v) => {
+  userSearch.value = v
+  if (!v || v.length < 1) { userOptions.value = []; showUserDropdown.value = false; return }
+  if (userSearchTimer) clearTimeout(userSearchTimer as any)
+  userSearchTimer = window.setTimeout(async () => {
+    try {
+      const data = await http('/users.search.json?q=' + encodeURIComponent(v))
+      userOptions.value = Array.isArray(data) ? data : []
+      showUserDropdown.value = userOptions.value.length > 0
+    } catch {
+      userOptions.value = []
+      showUserDropdown.value = false
+    }
+  }, 200)
+})
+
+function selectUserOption(u: Curator) {
+  curatorEmail.value = u.email
+  showUserDropdown.value = false
+}
+
+function closeUserDropdown() { showUserDropdown.value = false }
+
+async function assignCurator() {
+  const email = curatorEmail.value.trim()
+  if (!selectedPdpId.value) return
+  if (!email || !email.includes('@')) return alert('Enter a valid email')
+  try {
+    const res = await http(`/pdps/${selectedPdpId.value}/assign-curator.json`, { method: 'POST', body: JSON.stringify({ email }) })
+    if (res?.curator) {
+      const exists = curators.value.some(c => c.id === res.curator.id)
+      if (!exists) curators.value.push(res.curator as Curator)
+    }
+    alert('Curator assigned')
+    curatorEmail.value = ''
+  } catch (e: any) {
+    alert('Failed to assign curator: ' + (e?.message || 'Error'))
+  }
+}
+
+async function removeCurator(c: Curator) {
+  if (!selectedPdpId.value) return
+  if (!confirm(`Remove ${c.name || c.email} from curators?`)) return
+  try {
+    await http(`/pdps/${selectedPdpId.value}/curators/${c.id}.json`, { method: 'DELETE' })
+    curators.value = curators.value.filter(x => x.id !== c.id)
+  } catch (e: any) {
+    alert('Failed to remove curator: ' + (e?.message || 'Error'))
+  }
+}
+
+onMounted(async () => {
+  let deepPdp: number | null = null
+  let deepSkill: number | null = null
+  let deepCriterion: number | null = null
   try {
     const params = new URLSearchParams(location.search)
     const tab = params.get('tab')?.toLowerCase()
     if (tab === 'annex') activeTab.value = 'Annex'
+    const p = parseInt(params.get('pdp') || '', 10)
+    const s = parseInt(params.get('skill') || '', 10)
+    const c = parseInt(params.get('criterion') || '', 10)
+    deepPdp = Number.isFinite(p) && p > 0 ? p : null
+    deepSkill = Number.isFinite(s) && s > 0 ? s : null
+    deepCriterion = Number.isFinite(c) && c >= 0 ? c : null
+    // Force Manage tab if deep-link provided to open progress modal
+    if (deepPdp && deepSkill != null && deepCriterion != null) {
+      activeTab.value = 'Manage'
+    }
   } catch {}
-  loadPdps()
+  await Promise.all([loadPdps(), loadSharedPdps()])
+  if (deepPdp) {
+    selectedPdpId.value = deepPdp
+    // Load curators only for owned PDPs
+    if (pdps.value.some(p => p.id === deepPdp)) {
+      loadCurators(deepPdp)
+    } else {
+      curators.value = []
+    }
+    await loadSkills(deepPdp)
+    if (deepSkill && deepCriterion != null) {
+      const s = skills.value.find(sk => sk.id === deepSkill)
+      if (s) {
+        openProgressModal(s, deepCriterion)
+      }
+    }
+  } else if (!selectedPdpId.value) {
+    if (pdps.value.length) selectPdp(pdps.value[0].id)
+    else if (sharedPdps.value.length) selectPdpFromShared(sharedPdps.value[0].id)
+  }
 })
+function statusBadgeClass(status: string): string {
+  switch (status) {
+    case 'Done':
+      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+    case 'In Progress':
+      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+    case 'Blocked':
+      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+    default: // Planned or any other
+      return 'bg-muted text-muted-foreground'
+  }
+}
+
 </script>
 
 <template>
@@ -524,30 +886,73 @@ onMounted(() => {
         <!-- PDP list (top) -->
         <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
           <div class="mb-3 flex items-center justify-between">
-            <h2 class="text-base font-semibold">Your PDPs</h2>
-            <button v-if="activeTab!=='Annex'" class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreatePdp">+ Add PDP</button>
+            <div class="flex items-center gap-2">
+              <h2 class="text-base font-semibold">Your PDPs</h2>
+              <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseOwned=!collapseOwned" :title="collapseOwned ? 'Expand' : 'Collapse'" :aria-label="collapseOwned ? 'Expand' : 'Collapse'">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseOwned ? '-rotate-90' : 'rotate-0'">
+                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
+            <div class="flex items-center gap-2" v-if="activeTab!=='Annex'">
+              <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="triggerImport">Import PDP</button>
+              <input ref="importInputRef" type="file" accept="application/json" class="hidden" @change="onImportFileChange" />
+              <button class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreatePdp">+ Add PDP</button>
+            </div>
           </div>
 
-          <div v-if="hasPdps" class="space-y-1">
-            <button v-for="p in pdps" :key="p.id" class="w-full rounded-md border px-3 py-2 text-left text-sm hover:bg-muted" :class="selectedPdpId===p.id ? 'border-primary' : 'border-border'" @click="selectPdp(p.id)">
-              <div class="flex items-center justify-between">
-                <span class="font-medium">{{ p.title }}</span>
-                <span class="text-xs text-muted-foreground">{{ p.skills_count ?? 0 }} skills</span>
-              </div>
-              <div class="text-xs text-muted-foreground">{{ p.status }} · {{ p.priority }}<span v-if="p.eta"> · ETA: {{ p.eta }}</span></div>
-              <div class="mt-2 flex gap-2">
-                <button class="rounded border px-2 py-1 text-[11px] hover:bg-muted" @click.stop="openEditPdp(p)">Edit</button>
-                <button class="rounded border px-2 py-1 text-[11px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click.stop="deletePdp(p.id)">Delete</button>
-              </div>
-            </button>
+          <div v-if="!collapseOwned">
+            <div v-if="hasPdps" class="space-y-1">
+              <button v-for="p in pdps" :key="p.id" class="w-full rounded-md border px-3 py-2 text-left text-sm hover:bg-muted" :class="selectedPdpId===p.id ? 'border-primary' : 'border-border'" @click="selectPdp(p.id)">
+                <div class="flex items-center justify-between">
+                  <span class="font-medium">{{ p.title }}</span>
+                  <span class="text-xs text-muted-foreground">{{ p.skills_count ?? 0 }} skills</span>
+                </div>
+                <div class="text-xs text-muted-foreground">{{ p.status }} · {{ p.priority }}<span v-if="p.eta"> · ETA: {{ p.eta }}</span></div>
+                <div class="mt-2 flex gap-2">
+                  <button class="rounded border px-2 py-1 text-[11px] hover:bg-muted" @click.stop="openEditPdp(p)">Edit</button>
+                  <button class="rounded border px-2 py-1 text-[11px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click.stop="deletePdp(p.id)">Delete</button>
+                </div>
+              </button>
+            </div>
+            <p v-else class="text-sm text-muted-foreground">The list is empty. Add the first PDP.</p>
           </div>
-          <p v-else class="text-sm text-muted-foreground">The list is empty. Add the first PDP.</p>
+          <p v-else class="text-xs text-muted-foreground">Collapsed</p>
+
+          <div class="mt-6">
+            <div class="mb-3 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <h2 class="text-base font-semibold">Shared PDPs</h2>
+                <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseShared=!collapseShared" :title="collapseShared ? 'Expand' : 'Collapse'" :aria-label="collapseShared ? 'Expand' : 'Collapse'">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseShared ? '-rotate-90' : 'rotate-0'">
+                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div v-if="!collapseShared">
+              <div v-if="hasSharedPdps" class="space-y-1">
+                <button v-for="p in sharedPdps" :key="'s-'+p.id" class="w-full rounded-md border px-3 py-2 text-left text-sm hover:bg-muted" :class="selectedPdpId===p.id ? 'border-primary' : 'border-border'" @click="selectPdpFromShared(p.id)">
+                  <div class="flex items-center justify-between">
+                    <span class="font-medium">{{ p.title }}</span>
+                    <span class="text-xs text-muted-foreground">{{ p.skills_count ?? 0 }} skills</span>
+                  </div>
+                  <div class="text-xs text-muted-foreground">{{ p.status }} · {{ p.priority }}<span v-if="p.eta"> · ETA: {{ p.eta }}</span></div>
+                  <div v-if="p.user" class="text-[11px] text-muted-foreground mt-0.5">Owner: {{ p.user.name || p.user.email }}<span v-if="p.user.name"> ({{ p.user.email }})</span></div>
+                </button>
+              </div>
+              <p v-else class="text-sm text-muted-foreground">No shared PDPs yet.</p>
+            </div>
+            <p v-else class="text-xs text-muted-foreground">Collapsed</p>
+          </div>
         </div>
 
         <!-- Tabs: Manage / Annex -->
         <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
           <div class="mb-3 flex items-center justify-end">
-            <div v-if="selectedPdp && activeTab==='Manage'">
+            <div v-if="selectedPdp && activeTab==='Manage' && selectedPdpIsEditable" class="flex gap-2">
+              <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="openEditPdp(selectedPdp as any)">Edit PDP</button>
+              <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="downloadPdpTemplate">Export JSON</button>
               <button class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreateSkill">+ Add Skill</button>
             </div>
             <div v-if="selectedPdp && activeTab==='Annex' && (annex?.skills || []).length">
@@ -559,6 +964,31 @@ onMounted(() => {
           <template v-if="activeTab==='Manage'">
             <template v-if="selectedPdp">
               <p class="mb-3 text-sm text-muted-foreground">{{ selectedPdp.description }}</p>
+              <p v-if="selectedPdpIsCurator && (selectedPdp as any)?.user" class="-mt-2 mb-3 text-[11px] text-muted-foreground">Owner: {{ (selectedPdp as any).user.name || (selectedPdp as any).user.email }}<span v-if="(selectedPdp as any).user.name"> ({{ (selectedPdp as any).user.email }})</span></p>
+
+              <div v-if="activeTab==='Manage' && selectedPdpIsOwner" class="mb-4">
+                <div class="flex items-center gap-2">
+                  <div class="relative">
+                    <input v-model="curatorEmail" @focus="showUserDropdown = userOptions.length>0" @blur="setTimeout(()=>closeUserDropdown(),100)" type="text" placeholder="Enter curator email or name" class="w-64 rounded border px-2 py-1 text-sm" />
+                    <ul v-if="showUserDropdown" class="absolute z-10 mt-1 max-h-56 w-[22rem] overflow-auto rounded-md border bg-background shadow">
+                      <li v-for="u in userOptions" :key="u.id" class="flex cursor-pointer items-center justify-between px-2 py-1 text-sm hover:bg-muted" @mousedown.prevent="selectUserOption(u)">
+                        <span class="font-medium">{{ u.name || u.email }}</span>
+                        <span class="ml-2 text-xs text-muted-foreground" v-if="u.name">{{ u.email }}</span>
+                      </li>
+                      <li v-if="!userOptions.length" class="px-2 py-1 text-xs text-muted-foreground">No matches</li>
+                    </ul>
+                  </div>
+                  <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" @click="assignCurator">Assign curator</button>
+                </div>
+                <div v-if="curators.length" class="mt-2 flex flex-wrap gap-2">
+                  <span v-for="c in curators" :key="c.id" class="inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-xs">
+                    <span class="font-medium">{{ c.name || c.email }}</span>
+                    <span v-if="c.name" class="text-muted-foreground">{{ c.email }}</span>
+                    <button class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[11px] hover:bg-muted" title="Remove curator" @click="removeCurator(c)">×</button>
+                  </span>
+                </div>
+              </div>
+
               <div v-if="skills.length" class="overflow-x-auto">
                 <table class="min-w-full text-sm">
                   <thead>
@@ -578,18 +1008,32 @@ onMounted(() => {
                       <td class="px-3 py-3 whitespace-pre-line">{{ s.description }}</td>
                       <td class="px-3 py-3">
                         <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-wrap gap-1.5">
-                          <button v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" type="button" class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
-                            <span>{{ c.text }}</span>
-                            <span v-if="c.comment" class="text-muted-foreground">•</span>
-                          </button>
+                          <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="inline-flex items-center gap-1">
+                            <button type="button" class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
+                              <span>{{ c.text }}</span>
+                              <span v-if="c.comment" class="text-muted-foreground">•</span>
+                            </button>
+                            <button v-if="selectedPdpIsEditable" type="button" class="inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
+                              <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
+                                <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
+                              </svg>
+                              <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3 text-green-600">
+                                <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.793-6.793a1 1 0 011.414 0z" clip-rule="evenodd" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                         <span v-else class="text-muted-foreground">—</span>
                       </td>
                       <td class="px-3 py-3">{{ s.priority }}</td>
                       <td class="px-3 py-3">{{ s.eta }}</td>
-                      <td class="px-3 py-3">{{ s.status }}</td>
+                      <td class="px-3 py-3">
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap" :class="statusBadgeClass(s.status)">
+                          {{ s.status }}
+                        </span>
+                      </td>
                       <td class="px-3 py-3 text-right">
-                        <div class="flex justify-end gap-2">
+                        <div class="flex justify-end gap-2" v-if="selectedPdpIsEditable">
                           <button class="rounded border px-2 py-1 text-xs hover:bg-muted" @click="openEditSkill(s)">Edit</button>
                           <button class="rounded border px-2 py-1 text-xs text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteSkill(s.id)">Delete</button>
                         </div>
@@ -778,7 +1222,7 @@ onMounted(() => {
               <div class="max-h-64 overflow-auto rounded-md border divide-y">
                 <div v-if="progressState.loading" class="p-3 text-xs text-muted-foreground">Loading…</div>
                 <template v-else>
-                  <div v-if="progressState.entries.length===0" class="p-3 text-xs text-muted-foreground">Поки що немає записів.</div>
+                  <div v-if="progressState.entries.length===0" class="p-3 text-xs text-muted-foreground">No entries yet.</div>
                   <div v-for="e in progressState.entries" :key="e.id" class="p-3 text-sm">
                     <div class="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
                       <div class="flex items-center gap-2">
@@ -789,8 +1233,8 @@ onMounted(() => {
                         >{{ e.approved ? 'Approved' : 'Pending' }}</span>
                       </div>
                       <div class="flex items-center gap-1">
-                        <button v-if="!e.approved" class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="approveProgressEntry(e.id)">Approve</button>
-                        <button class="rounded border px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteProgressEntry(e.id)">Delete</button>
+                        <button v-if="!e.approved && selectedPdpIsCurator" class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="approveProgressEntry(e.id)">Approve</button>
+                        <button v-if="selectedPdpIsOwner" class="rounded border px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteProgressEntry(e.id)">Delete</button>
                       </div>
                     </div>
                     <div class="whitespace-pre-line">{{ e.note }}</div>
@@ -799,11 +1243,11 @@ onMounted(() => {
               </div>
             </div>
 
-            <div>
-              <label class="mb-1 block text-xs font-medium">Новий запис</label>
-              <textarea v-model="progressState.newNote" rows="3" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="Опишіть, що саме було зроблено / проміжний результат"></textarea>
+            <div v-if="selectedPdpIsOwner">
+              <label class="mb-1 block text-xs font-medium">New entry</label>
+              <textarea v-model="progressState.newNote" rows="3" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="Describe what was done / intermediate result"></textarea>
               <div class="mt-2 flex justify-end">
-                <button class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90" @click="addProgressNote">Додати запис</button>
+                <button class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90" @click="addProgressNote">Add entry</button>
               </div>
             </div>
           </div>
