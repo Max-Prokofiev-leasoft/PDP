@@ -14,7 +14,7 @@ import {
 import { dashboard } from '@/routes';
 import { type NavItem } from '@/types';
 import { Link } from '@inertiajs/vue3';
-import { BookOpen, LayoutGrid, List, FileText } from 'lucide-vue-next';
+import { BookOpen, LayoutGrid, List, FileText, Layers } from 'lucide-vue-next';
 import AppLogo from './AppLogo.vue';
 
 const mainNavItems: NavItem[] = [
@@ -32,6 +32,11 @@ const mainNavItems: NavItem[] = [
         title: 'Annex',
         href: '/pdps?tab=annex',
         icon: FileText,
+    },
+    {
+        title: 'PDP Templates',
+        href: '/pdps/templates',
+        icon: Layers,
     },
 ];
 

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Pdp;
 use App\Models\PdpSkill;
 use App\Models\User;
+use App\Models\PdpTemplate;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Str;
@@ -256,8 +257,8 @@ class PdpController extends Controller
                 'description' => $s->description,
                 'criteria' => $s->criteria,
                 'priority' => $s->priority,
-                'eta' => $s->eta,
-                'status' => $s->status,
+                'eta' => null, // template: no timeline/progress
+                'status' => 'Planned', // template: reset status
                 'order_column' => $s->order_column,
             ];
         }
@@ -267,8 +268,8 @@ class PdpController extends Controller
                 'title' => $pdp->title,
                 'description' => $pdp->description,
                 'priority' => $pdp->priority,
-                'eta' => $pdp->eta,
-                'status' => $pdp->status,
+                'eta' => null, // template: no timeline/progress
+                'status' => 'Planned', // template: reset status
             ],
             'skills' => $outSkills,
         ]);
@@ -322,5 +323,210 @@ class PdpController extends Controller
         }
 
         return response()->json($new->fresh()->loadCount('skills'), Response::HTTP_CREATED);
+    }
+
+    // List PDP templates (DB-backed only). No completion indicators.
+    public function templates(Request $request)
+    {
+        $list = [];
+        $db = PdpTemplate::query()->where('published', true)->orderByDesc('created_at')->get();
+        foreach ($db as $tpl) {
+            $data = (array) $tpl->data;
+            $p = (array) ($data['pdp'] ?? []);
+            $skills = (array) ($data['skills'] ?? []);
+            $list[] = [
+                'key' => 'db-' . $tpl->id,
+                'title' => $p['title'] ?? ($tpl->title ?: 'Template'),
+                'description' => $p['description'] ?? $tpl->description,
+                'priority' => (string)($p['priority'] ?? 'Medium'),
+                'status' => (string)($p['status'] ?? 'Planned'),
+                'skills_count' => count($skills),
+            ];
+        }
+        return response()->json($list);
+    }
+
+    // Assign a template to current user: creates a new PDP with skills. Only DB-backed templates are supported.
+    public function assignTemplate(Request $request, string $key)
+    {
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+
+        $id = (int) Str::after($key, 'db-');
+        $record = PdpTemplate::query()->where('id', $id)->where('published', true)->first();
+        abort_unless($record, Response::HTTP_NOT_FOUND);
+        $tpl = (array) $record->data;
+        $p = $tpl['pdp'] ?? [];
+
+        $new = Pdp::create([
+            'user_id' => $request->user()->id,
+            'title' => (string)($p['title'] ?? 'PDP Template'),
+            'description' => $p['description'] ?? null,
+            'priority' => (string)($p['priority'] ?? 'Medium'),
+            'eta' => $p['eta'] ?? null,
+            'status' => (string)($p['status'] ?? 'Planned'),
+        ]);
+
+        $skills = $tpl['skills'] ?? [];
+        $order = 0;
+        foreach ($skills as $s) {
+            PdpSkill::create([
+                'pdp_id' => $new->id,
+                'skill' => (string)$s['skill'],
+                'description' => $s['description'] ?? null,
+                'criteria' => $s['criteria'] ?? null,
+                'priority' => (string)($s['priority'] ?? 'Medium'),
+                'eta' => $s['eta'] ?? null,
+                'status' => (string)($s['status'] ?? 'Planned'),
+                'order_column' => $s['order_column'] ?? $order,
+            ]);
+            $order++;
+        }
+
+        return response()->json($new->fresh()->loadCount('skills'), Response::HTTP_CREATED);
+    }
+
+    // Create/store a new template in DB.
+    public function createTemplate(Request $request)
+    {
+        // Accept the same shape as import/export JSON
+        $data = $request->validate([
+            'version' => ['nullable','integer'],
+            'pdp' => ['required','array'],
+            'pdp.title' => ['required','string','max:255'],
+            'pdp.description' => ['nullable','string'],
+            'pdp.priority' => ['nullable','in:Low,Medium,High'],
+            'pdp.eta' => ['nullable','string','max:255'],
+            'pdp.status' => ['nullable','in:Planned,In Progress,Done,Blocked'],
+            'skills' => ['nullable','array'],
+            'skills.*.skill' => ['required','string','max:255'],
+            'skills.*.description' => ['nullable','string'],
+            'skills.*.criteria' => ['nullable','string'],
+            'skills.*.priority' => ['nullable','in:Low,Medium,High'],
+            'skills.*.eta' => ['nullable','string','max:255'],
+            'skills.*.status' => ['nullable','in:Planned,In Progress,Done,Blocked'],
+            'skills.*.order_column' => ['nullable','integer','min:0'],
+        ]);
+
+        // Normalize missing defaults for template (no timeline/progress by default)
+        $p = $data['pdp'];
+        $p['priority'] = $p['priority'] ?? 'Medium';
+        $p['eta'] = $p['eta'] ?? null;
+        $p['status'] = $p['status'] ?? 'Planned';
+        $skills = [];
+        $order = 0;
+        foreach (($data['skills'] ?? []) as $s) {
+            $skills[] = [
+                'skill' => $s['skill'],
+                'description' => $s['description'] ?? null,
+                'criteria' => $s['criteria'] ?? null,
+                'priority' => $s['priority'] ?? 'Medium',
+                'eta' => null,
+                'status' => 'Planned',
+                'order_column' => $s['order_column'] ?? $order,
+            ];
+            $order++;
+        }
+        $payload = [
+            'version' => (int)($data['version'] ?? 1),
+            'pdp' => $p,
+            'skills' => $skills,
+        ];
+
+        $tpl = PdpTemplate::create([
+            'user_id' => $request->user()->id,
+            'title' => (string)($p['title'] ?? 'Template'),
+            'description' => $p['description'] ?? null,
+            'data' => $payload,
+            'published' => true,
+        ]);
+
+        return response()->json([
+            'key' => 'db-' . $tpl->id,
+            'id' => (int)$tpl->id,
+            'title' => (string)($p['title'] ?? 'Template'),
+            'skills_count' => count($skills),
+        ], Response::HTTP_CREATED);
+    }
+
+    // Built-in templates catalog definition (minimal, can be extended or moved to DB later)
+    private function templatesCatalog(): array
+    {
+        // Criteria are stored as JSON string in the same format used in the app.
+        $json = static fn(array $items) => json_encode($items, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+
+        return [
+            'junior_backend' => [
+                'pdp' => [
+                    'title' => 'Junior Backend Developer PDP',
+                    'description' => 'Starter plan for a junior backend developer focusing on PHP and Laravel basics.',
+                    'priority' => 'Medium',
+                    'eta' => null,
+                    'status' => 'Planned',
+                ],
+                'skills' => [
+                    [
+                        'skill' => 'PHP Fundamentals',
+                        'description' => 'Syntax, OOP, Composer, PSR standards',
+                        'criteria' => $json([
+                            ['text' => 'Understand basic syntax and types'],
+                            ['text' => 'OOP pillars: encapsulation, inheritance, polymorphism'],
+                            ['text' => 'Use Composer and autoloading'],
+                        ]),
+                        'priority' => 'High',
+                        'eta' => null,
+                        'status' => 'Planned',
+                        'order_column' => 0,
+                    ],
+                    [
+                        'skill' => 'Laravel Basics',
+                        'description' => 'Routing, Controllers, Eloquent, Migrations',
+                        'criteria' => $json([
+                            ['text' => 'Build a simple CRUD with Eloquent'],
+                            ['text' => 'Understand service container and facades'],
+                            ['text' => 'Create and run database migrations'],
+                        ]),
+                        'priority' => 'High',
+                        'eta' => null,
+                        'status' => 'Planned',
+                        'order_column' => 1,
+                    ],
+                ],
+            ],
+            'qa_engineer' => [
+                'pdp' => [
+                    'title' => 'QA Engineer PDP',
+                    'description' => 'Template for manual and automated testing skills.',
+                    'priority' => 'Medium',
+                    'eta' => null,
+                    'status' => 'Planned',
+                ],
+                'skills' => [
+                    [
+                        'skill' => 'Test Case Design',
+                        'description' => 'Equivalence partitioning, boundary values',
+                        'criteria' => $json([
+                            ['text' => 'Write clear, reproducible test cases'],
+                            ['text' => 'Apply boundary value analysis'],
+                        ]),
+                        'priority' => 'Medium',
+                        'eta' => null,
+                        'status' => 'Planned',
+                        'order_column' => 0,
+                    ],
+                    [
+                        'skill' => 'Automation Basics',
+                        'description' => 'Selenium or Playwright basics',
+                        'criteria' => $json([
+                            ['text' => 'Set up basic UI test project'],
+                            ['text' => 'Create smoke test for login flow'],
+                        ]),
+                        'priority' => 'Low',
+                        'eta' => null,
+                        'status' => 'Planned',
+                        'order_column' => 1,
+                    ],
+                ],
+            ],
+        ];
     }
 }

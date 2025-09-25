@@ -22,11 +22,19 @@ Route::get('pdps', function () {
     return Inertia::render('pdps/Index');
 })->middleware(['auth', 'verified'])->name('pdps.index');
 
+// PDP templates page
+Route::get('pdps/templates', function () {
+    return Inertia::render('pdps/Templates');
+})->middleware(['auth', 'verified'])->name('pdps.templates');
+
 // JSON endpoints for PDPs and Skills (session-authenticated + CSRF)
 Route::middleware(['auth', 'verified'])->group(function () {
     // PDPs
     Route::get('/pdps.json', [PdpController::class, 'index']);
     Route::get('/pdps.shared.json', [PdpController::class, 'shared']);
+    Route::get('/pdps/templates.json', [PdpController::class, 'templates']);
+    Route::post('/pdps/templates.json', [PdpController::class, 'createTemplate']);
+    Route::post('/pdps/templates/{key}/assign.json', [PdpController::class, 'assignTemplate']);
     Route::post('/pdps.json', [PdpController::class, 'store']);
     Route::post('/pdps/{pdp}/assign-curator.json', [PdpController::class, 'assignCurator']);
     Route::get('/pdps/{pdp}/curators.json', [PdpController::class, 'curators']);

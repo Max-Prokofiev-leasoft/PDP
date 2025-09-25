@@ -51,28 +51,6 @@ const breadcrumbsItems = computed<BreadcrumbItem[]>(() => [
 
 // State
 const pdps = ref<Pdp[]>([])
-const importInputRef = ref<HTMLInputElement | null>(null)
-function triggerImport() { importInputRef.value?.click() }
-async function onImportFileChange(ev: Event) {
-  const input = ev.target as HTMLInputElement
-  const file = input?.files && input.files[0]
-  if (!file) return
-  try {
-    const text = await file.text()
-    const payload = JSON.parse(text)
-    const created = await http('/pdps/import.json', { method: 'POST', body: JSON.stringify(payload) })
-    await loadPdps()
-    if (created?.id) {
-      selectedPdpId.value = created.id
-      await loadSkills(created.id)
-    }
-    notifySuccess('PDP imported successfully')
-  } catch (e: any) {
-    notifyError('Import failed: ' + (e?.message || 'Error'))
-  } finally {
-    if (input) input.value = ''
-  }
-}
 const sharedPdps = ref<Pdp[]>([])
 const selectedPdpId = ref<number | null>(null)
 const skills = ref<PdpSkill[]>([])
@@ -717,8 +695,6 @@ onMounted(async () => {
               </button>
             </div>
             <div class="flex items-center gap-2" v-if="activeTab!=='Annex'">
-              <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="triggerImport">Import PDP</button>
-              <input ref="importInputRef" type="file" accept="application/json" class="hidden" @change="onImportFileChange" />
               <button class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreatePdp">+ Add PDP</button>
             </div>
           </div>
@@ -829,25 +805,25 @@ onMounted(async () => {
                     <tr v-for="s in skills" :key="s.id" class="border-b align-top">
                       <td class="px-3 py-3 font-medium">{{ s.skill }}</td>
                       <td class="px-3 py-3 whitespace-pre-line">{{ s.description }}</td>
-                      <td class="px-3 py-3">
-                        <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-wrap gap-1.5">
-                          <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="inline-flex items-center gap-1">
-                              <button type="button" class="inline-flex items-start gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer w-72 md:w-80 lg:w-66 text-center" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
-                                  <span class="flex-1 min-w-0 whitespace-normal break-words leading-snug">{{ c.text }}</span>
-                                  <span v-if="c.comment" class="text-muted-foreground shrink-0 self-start mt-0.5">•</span>
-                              </button>
-                            <button v-if="selectedPdpIsEditable" type="button" class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
-                              <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
-                                <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
-                              </svg>
-                              <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3 text-green-600">
-                                <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.793-6.793a1 1 0 011.414 0z" clip-rule="evenodd" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                        <span v-else class="text-muted-foreground">—</span>
-                      </td>
+                        <td class="px-3 py-3">
+                            <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-col gap-1.5">
+                                <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="flex items-start gap-1 w-full">
+                                    <button type="button" class="inline-flex flex-1 items-start justify-between rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70 cursor-pointer text-left" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
+                                        <span class="whitespace-normal break-words">{{ c.text }}</span>
+                                        <span v-if="c.comment" class="ml-2 shrink-0 text-muted-foreground">•</span>
+                                    </button>
+                                    <button v-if="selectedPdpIsEditable" type="button" class="inline-flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md border text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
+                                        <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
+                                            <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
+                                        </svg>
+                                        <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3 text-green-600">
+                                            <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.793-6.793a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <span v-else class="text-muted-foreground">—</span>
+                        </td>
                       <td class="px-3 py-3">{{ s.priority }}</td>
                       <td class="px-3 py-3">{{ s.eta }}</td>
                       <td class="px-3 py-3">
