@@ -37,6 +37,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::put('/pdps/{pdp}.json', [PdpController::class, 'update']);
     Route::delete('/pdps/{pdp}.json', [PdpController::class, 'destroy']);
 
+    // Users search for assignment dropdown
+    Route::get('/users.search.json', [PdpController::class, 'usersSearch']);
+
     // PDP Skills
     Route::get('/pdps/{pdp}/skills.json', [PdpSkillController::class, 'index']);
     Route::post('/pdps/{pdp}/skills.json', [PdpSkillController::class, 'store']);

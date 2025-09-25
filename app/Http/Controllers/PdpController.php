@@ -7,6 +7,7 @@ use App\Models\PdpSkill;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Str;
 
 class PdpController extends Controller
 {
@@ -162,6 +163,25 @@ class PdpController extends Controller
         abort_unless($pdp->user_id === $request->user()->id, Response::HTTP_FORBIDDEN);
         $list = $pdp->curators()->select('users.id','users.name','users.email')->orderBy('users.name')->get();
         return response()->json($list);
+    }
+
+    // Quick users search by name or email for dropdown suggestions
+    public function usersSearch(Request $request)
+    {
+        $q = trim((string) $request->query('q', ''));
+        $limit = (int) $request->query('limit', 10);
+        $limit = max(1, min($limit, 20));
+        $query = User::query()->select('id','name','email')->orderBy('name');
+        if ($q !== '') {
+            $query->where(function($w) use ($q) {
+                $w->where('email', 'like', '%' . str_replace(['%','_'], ['\%','\_'], $q) . '%')
+                  ->orWhere('name', 'like', '%' . str_replace(['%','_'], ['\%','\_'], $q) . '%');
+            });
+        }
+        // Optionally restrict to company domain (uncomment if needed)
+        // $query->where('email', 'like', '%@leasoft.org');
+        $users = $query->limit($limit)->get();
+        return response()->json($users);
     }
 
     public function show(Request $request, Pdp $pdp)

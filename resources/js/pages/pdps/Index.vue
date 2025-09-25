@@ -41,6 +41,85 @@ const _pdfFontStyle = 'normal'
 const _pdfFontFileRegular = 'DejaVuSans.ttf'
 const _pdfFontFileBold = 'DejaVuSans-Bold.ttf'
 
+// LeaSoft logo loader (cached)
+let _leaLogoTried = false
+let _leaLogoDataUrl: string | null = null
+async function getLeaSoftLogo(): Promise<string | null> {
+  if (_leaLogoTried) return _leaLogoDataUrl
+  _leaLogoTried = true
+  try {
+    const res = await fetch('/images/lea-soft.png', { cache: 'force-cache' })
+    if (!res.ok) return null
+    const blob = await res.blob()
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('Failed to read logo blob'))
+      reader.readAsDataURL(blob)
+    })
+    _leaLogoDataUrl = dataUrl || null
+  } catch {
+    _leaLogoDataUrl = null
+  }
+  return _leaLogoDataUrl
+}
+
+// Return a circular-masked version of the LeaSoft logo as data URL (PNG)
+// Uses an offscreen canvas and caches by requested size.
+const _leaLogoCircularCache: Record<number, string> = {}
+async function getLeaSoftLogoCircular(size = 40): Promise<string | null> {
+  // Support native-resolution mode when size<=0
+  const cacheKey = (size && size > 0) ? size : 0
+  if (_leaLogoCircularCache[cacheKey]) return _leaLogoCircularCache[cacheKey]
+  const base = await getLeaSoftLogo()
+  if (!base) return null
+  try {
+    const img: HTMLImageElement = await new Promise((resolve, reject) => {
+      const im = new Image()
+      im.onload = () => resolve(im)
+      im.onerror = () => reject(new Error('Failed to load logo image'))
+      im.src = base
+    })
+
+    // Determine canvas size: native or fixed square
+    const useNative = !(size && size > 0)
+    const canW = useNative ? img.width : size
+    const canH = useNative ? img.height : size
+
+    const canvas = document.createElement('canvas')
+    canvas.width = canW
+    canvas.height = canH
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return base // fallback to original
+
+    // Clip to circle (use min dimension)
+    const diam = Math.min(canW, canH)
+    const cx = canW / 2
+    const cy = canH / 2
+    ctx.clearRect(0, 0, canW, canH)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, diam / 2, 0, Math.PI * 2)
+    ctx.closePath()
+    ctx.clip()
+
+    // Draw the image with object-fit: cover behavior
+    const scale = Math.max(diam / img.width, diam / img.height)
+    const drawW = img.width * scale
+    const drawH = img.height * scale
+    const dx = cx - drawW / 2
+    const dy = cy - drawH / 2
+    ctx.drawImage(img, dx, dy, drawW, drawH)
+    ctx.restore()
+
+    const out = canvas.toDataURL('image/png')
+    _leaLogoCircularCache[cacheKey] = out
+    return out
+  } catch {
+    return base
+  }
+}
+
 async function ensurePdfUnicodeFont(doc: any): Promise<void> {
   // Avoid re-registering for the same document instance
   if ((doc as any).__pdpFontLoaded) return
@@ -449,13 +528,62 @@ async function buildAnnexPdf(JsPDFCtor: any, data: any) {
   if (!data) return doc
   const pdp = data.pdp || {}
 
-  // Title and meta
-  addHeading(`Annex — ${pdp.title || 'PDP'}`, 1)
+  // Modern header with logo, owner, curators
+  const headerHeight = 70
+  ensureSpace(headerHeight)
+  // Company logo from public/images (fallback to simple circle if missing)
+  try {
+    const logo = await getLeaSoftLogoCircular(0)
+    if (logo) {
+      // Draw the circular logo 40x40 at the left; keep title offset at +48 to align
+      doc.addImage(logo, 'PNG', margin, y, 40, 40)
+    } else {
+      doc.setFillColor(28, 100, 242)
+      doc.circle(margin + 20, y + 20, 14, 'F')
+      setFontSafe(true)
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(12)
+      doc.text('P', margin + 20 - 3.5, y + 24)
+      doc.setTextColor(0, 0, 0)
+    }
+  } catch {
+    try {
+      doc.setFillColor(28, 100, 242)
+      doc.circle(margin + 20, y + 20, 14, 'F')
+      setFontSafe(true)
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(12)
+      doc.text('P', margin + 20 - 3.5, y + 24)
+      doc.setTextColor(0, 0, 0)
+    } catch {}
+  }
+
+  // Title
+  setFontSafe(true)
+  doc.setFontSize(18)
+  doc.text(`Annex — ${pdp.title || 'PDP'}`, margin + 48, y + 8)
+
+  // Meta + owner/curators under title
+  setFontSafe(false)
+  doc.setFontSize(11)
   const meta: string[] = []
   if (pdp.status) meta.push(`Status: ${pdp.status}`)
   if (pdp.priority) meta.push(`Priority: ${pdp.priority}`)
   if (pdp.eta) meta.push(`ETA: ${pdp.eta}`)
-  if (meta.length) addText(meta.join(' · '))
+  const owner = (data && data.owner) || (selectedPdp?.value as any)?.user || null
+  const ownerLine = owner ? `Owner: ${owner.name || owner.email || '—'}` : (selectedPdpIsOwner.value ? 'Owner: You' : '')
+  const curatorsList = Array.isArray((data && data.curators)) ? (data.curators as any[]) : curators.value
+  const curatorsLine = curatorsList && curatorsList.length ? `Curators: ${curatorsList.map((c:any)=>c.name || c.email).join(', ')}` : ''
+  const metaLine = meta.join(' · ')
+  const infoCombined = [metaLine, ownerLine, curatorsLine].filter(Boolean).join('  |  ')
+  const lines = doc.splitTextToSize(infoCombined, contentWidth - 48)
+  let infoY = y + 26
+  for (const ln of lines) {
+    ensureSpace(14)
+    doc.text(ln, margin + 48, infoY)
+    infoY += 14
+  }
+  y = infoY + 6
   if (pdp.description) addText(String(pdp.description))
   addSpacer(6)
 
@@ -497,7 +625,12 @@ async function downloadCurrentPdpAnnex() {
     await loadAnnex(selectedPdpId.value)
   }
   const JsPDFCtor = await getJsPdfCtor()
-  const doc = await buildAnnexPdf(JsPDFCtor, annex.value)
+  // Ensure curators loaded for owner case
+  if (selectedPdpIsOwner.value && selectedPdpId.value && curators.value.length === 0) {
+    try { await loadCurators(selectedPdpId.value) } catch {}
+  }
+  const payload = { ...(annex.value || {}), owner: (selectedPdp.value as any)?.user || (selectedPdpIsOwner.value ? { name: 'You' } : null), curators: curators.value }
+  const doc = await buildAnnexPdf(JsPDFCtor, payload)
   const now = new Date()
   const yyyy = now.getFullYear()
   const mm = String(now.getMonth()+1).padStart(2,'0')
@@ -631,6 +764,34 @@ function selectPdpFromShared(id: number) {
 }
 
 const curatorEmail = ref('')
+const userSearch = ref('')
+const userOptions = ref<Curator[]>([])
+const showUserDropdown = ref(false)
+let userSearchTimer: number | null = null
+
+watch(curatorEmail, (v) => {
+  userSearch.value = v
+  if (!v || v.length < 1) { userOptions.value = []; showUserDropdown.value = false; return }
+  if (userSearchTimer) clearTimeout(userSearchTimer as any)
+  userSearchTimer = window.setTimeout(async () => {
+    try {
+      const data = await http('/users.search.json?q=' + encodeURIComponent(v))
+      userOptions.value = Array.isArray(data) ? data : []
+      showUserDropdown.value = userOptions.value.length > 0
+    } catch {
+      userOptions.value = []
+      showUserDropdown.value = false
+    }
+  }, 200)
+})
+
+function selectUserOption(u: Curator) {
+  curatorEmail.value = u.email
+  showUserDropdown.value = false
+}
+
+function closeUserDropdown() { showUserDropdown.value = false }
+
 async function assignCurator() {
   const email = curatorEmail.value.trim()
   if (!selectedPdpId.value) return
@@ -807,7 +968,16 @@ function statusBadgeClass(status: string): string {
 
               <div v-if="activeTab==='Manage' && selectedPdpIsOwner" class="mb-4">
                 <div class="flex items-center gap-2">
-                  <input v-model="curatorEmail" type="email" placeholder="Enter curator email" class="w-64 rounded border px-2 py-1 text-sm" />
+                  <div class="relative">
+                    <input v-model="curatorEmail" @focus="showUserDropdown = userOptions.length>0" @blur="setTimeout(()=>closeUserDropdown(),100)" type="text" placeholder="Enter curator email or name" class="w-64 rounded border px-2 py-1 text-sm" />
+                    <ul v-if="showUserDropdown" class="absolute z-10 mt-1 max-h-56 w-[22rem] overflow-auto rounded-md border bg-background shadow">
+                      <li v-for="u in userOptions" :key="u.id" class="flex cursor-pointer items-center justify-between px-2 py-1 text-sm hover:bg-muted" @mousedown.prevent="selectUserOption(u)">
+                        <span class="font-medium">{{ u.name || u.email }}</span>
+                        <span class="ml-2 text-xs text-muted-foreground" v-if="u.name">{{ u.email }}</span>
+                      </li>
+                      <li v-if="!userOptions.length" class="px-2 py-1 text-xs text-muted-foreground">No matches</li>
+                    </ul>
+                  </div>
                   <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" @click="assignCurator">Assign curator</button>
                 </div>
                 <div v-if="curators.length" class="mt-2 flex flex-wrap gap-2">

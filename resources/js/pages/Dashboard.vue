@@ -329,10 +329,11 @@ onMounted(() => { loadOverview(); loadPending(); loadPdps().then(() => { loadSum
                   <div>
                     <div class="text-[11px] text-muted-foreground mb-2">Per-skill status</div>
                     <div v-if="(summary.skills || []).length" class="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                      <div v-for="s in summary.skills" :key="s.id" class="rounded border p-2">
-                        <div class="text-sm font-medium truncate">{{ s.skill }}</div>
-                        <div class="mt-1 text-[12px] text-muted-foreground">Total: {{ s.totalCriteria }}</div>
-                        <div class="mt-0.5 text-[12px]">
+                      <div v-for="s in summary.skills" :key="s.id" class="relative overflow-hidden rounded border p-2">
+                        <div class="absolute right-0 top-0 h-full w-1" :class="s.approvedCount===0 ? 'bg-red-500' : (s.pendingCount===0 ? 'bg-green-500' : 'bg-blue-500')"></div>
+                        <div class="text-sm font-medium truncate pr-2">{{ s.skill }}</div>
+                        <div class="mt-1 text-[12px] text-muted-foreground pr-2">Total: {{ s.totalCriteria }}</div>
+                        <div class="mt-0.5 text-[12px] pr-2">
                           <span class="font-medium">Closed:</span> {{ s.approvedCount }}
                           <span class="ml-3 font-medium">Open:</span> {{ s.pendingCount }}
                         </div>
