@@ -4,176 +4,20 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head } from '@inertiajs/vue3'
 import Heading from '@/components/Heading.vue'
-// jsPDF will be loaded on demand from CDN to avoid bundler resolution issues
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - dynamic global import
-let _jsPdfCtor: any = null;
-async function getJsPdfCtor(): Promise<any> {
-  if (typeof window !== 'undefined' && (window as any).jspdf?.jsPDF) {
-    return (window as any).jspdf.jsPDF
-  }
-  if (_jsPdfCtor) return _jsPdfCtor
-  await new Promise<void>((resolve, reject) => {
-    const id = 'jspdf-cdn-script'
-    if (document.getElementById(id)) {
-      ;(document.getElementById(id) as HTMLScriptElement).addEventListener('load', () => resolve())
-      return
-    }
-    const s = document.createElement('script')
-    s.id = id
-    s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
-    s.async = true
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error('Failed to load jsPDF'))
-    document.head.appendChild(s)
-  })
-  _jsPdfCtor = (window as any).jspdf?.jsPDF
-  if (!_jsPdfCtor) throw new Error('jsPDF not available after loading')
-  return _jsPdfCtor
-}
+import PdpFormModal from '@/components/pdps/modals/PdpFormModal.vue'
+import SkillFormModal from '@/components/pdps/modals/SkillFormModal.vue'
+import { getJsPdfCtor } from '@/composables/usePdfExport'
+import { ensurePdfUnicodeFont } from '@/utils/pdfFont'
+import { getLeaSoftLogoCircular } from '@/utils/images'
+import { formatKyivDateTime } from '@/utils/date'
+import { parseCriteriaItems } from '@/utils/criteria'
+import { statusBadgeClass } from '@/utils/status'
+import { notifySuccess, notifyError } from '@/composables/useNotify'
+import { confirmDialog } from '@/composables/useConfirm'
 
-// Load and register a Unicode font (with Cyrillic support) for jsPDF on-demand
-// Use static TTFs (Regular + Bold). Prefer DejaVu Sans (broad Unicode support) to avoid variable-font and glyph issues.
-let _pdfFontBase64Regular: string | null = null
-let _pdfFontBase64Bold: string | null = null
-const _pdfFontName = 'DejaVuSans'
-const _pdfFontStyle = 'normal'
-const _pdfFontFileRegular = 'DejaVuSans.ttf'
-const _pdfFontFileBold = 'DejaVuSans-Bold.ttf'
 
-// LeaSoft logo loader (cached)
-let _leaLogoTried = false
-let _leaLogoDataUrl: string | null = null
-async function getLeaSoftLogo(): Promise<string | null> {
-  if (_leaLogoTried) return _leaLogoDataUrl
-  _leaLogoTried = true
-  try {
-    const res = await fetch('/images/lea-soft.png', { cache: 'force-cache' })
-    if (!res.ok) return null
-    const blob = await res.blob()
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(String(reader.result || ''))
-      reader.onerror = () => reject(new Error('Failed to read logo blob'))
-      reader.readAsDataURL(blob)
-    })
-    _leaLogoDataUrl = dataUrl || null
-  } catch {
-    _leaLogoDataUrl = null
-  }
-  return _leaLogoDataUrl
-}
 
-// Return a circular-masked version of the LeaSoft logo as data URL (PNG)
-// Uses an offscreen canvas and caches by requested size.
-const _leaLogoCircularCache: Record<number, string> = {}
-async function getLeaSoftLogoCircular(size = 40): Promise<string | null> {
-  // Support native-resolution mode when size<=0
-  const cacheKey = (size && size > 0) ? size : 0
-  if (_leaLogoCircularCache[cacheKey]) return _leaLogoCircularCache[cacheKey]
-  const base = await getLeaSoftLogo()
-  if (!base) return null
-  try {
-    const img: HTMLImageElement = await new Promise((resolve, reject) => {
-      const im = new Image()
-      im.onload = () => resolve(im)
-      im.onerror = () => reject(new Error('Failed to load logo image'))
-      im.src = base
-    })
 
-    // Determine canvas size: native or fixed square
-    const useNative = !(size && size > 0)
-    const canW = useNative ? img.width : size
-    const canH = useNative ? img.height : size
-
-    const canvas = document.createElement('canvas')
-    canvas.width = canW
-    canvas.height = canH
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return base // fallback to original
-
-    // Clip to circle (use min dimension)
-    const diam = Math.min(canW, canH)
-    const cx = canW / 2
-    const cy = canH / 2
-    ctx.clearRect(0, 0, canW, canH)
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(cx, cy, diam / 2, 0, Math.PI * 2)
-    ctx.closePath()
-    ctx.clip()
-
-    // Draw the image with object-fit: cover behavior
-    const scale = Math.max(diam / img.width, diam / img.height)
-    const drawW = img.width * scale
-    const drawH = img.height * scale
-    const dx = cx - drawW / 2
-    const dy = cy - drawH / 2
-    ctx.drawImage(img, dx, dy, drawW, drawH)
-    ctx.restore()
-
-    const out = canvas.toDataURL('image/png')
-    _leaLogoCircularCache[cacheKey] = out
-    return out
-  } catch {
-    return base
-  }
-}
-
-async function ensurePdfUnicodeFont(doc: any): Promise<void> {
-  // Avoid re-registering for the same document instance
-  if ((doc as any).__pdpFontLoaded) return
-
-  const fetchAsBase64 = async (url: string) => {
-    const res = await fetch(url, { cache: 'force-cache' })
-    if (!res.ok) throw new Error(`Failed to fetch font: ${res.status}`)
-    const buf = await res.arrayBuffer()
-    let binary = ''
-    const bytes = new Uint8Array(buf)
-    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
-    return btoa(binary)
-  }
-
-  try {
-    if (!_pdfFontBase64Regular) {
-      _pdfFontBase64Regular = await fetchAsBase64('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/DejaVuSans.ttf')
-    }
-    if (!_pdfFontBase64Bold) {
-      _pdfFontBase64Bold = await fetchAsBase64('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/DejaVuSans-Bold.ttf')
-    }
-
-    doc.addFileToVFS(_pdfFontFileRegular, _pdfFontBase64Regular)
-    doc.addFileToVFS(_pdfFontFileBold, _pdfFontBase64Bold)
-    doc.addFont(_pdfFontFileRegular, _pdfFontName, 'normal')
-    doc.addFont(_pdfFontFileBold, _pdfFontName, 'bold')
-    doc.setFont(_pdfFontName, _pdfFontStyle)
-    ;(doc as any).__pdpFontLoaded = true
-  } catch {
-    // Fallback silently to default font if loading fails
-    // But still try to set Helvetica to keep consistent sizing
-    try { doc.setFont('helvetica', 'normal') } catch {}
-  }
-}
-
-// Date-time formatting helper (Kyiv timezone)
-function formatKyivDateTime(input?: string | number | Date): string {
-  if (!input) return ''
-  const d = new Date(input)
-  if (isNaN(d.getTime())) return ''
-  // Build parts to ensure YYYY-MM-DD HH:mm
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Kyiv',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(d)
-  const map: Record<string, string> = {}
-  for (const p of parts) map[p.type] = p.value
-  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}`
-}
 
 // Types
 export type Pdp = {
@@ -222,9 +66,9 @@ async function onImportFileChange(ev: Event) {
       selectedPdpId.value = created.id
       await loadSkills(created.id)
     }
-    alert('PDP imported successfully')
+    notifySuccess('PDP imported successfully')
   } catch (e: any) {
-    alert('Import failed: ' + (e?.message || 'Error'))
+    notifyError('Import failed: ' + (e?.message || 'Error'))
   } finally {
     if (input) input.value = ''
   }
@@ -269,30 +113,6 @@ const criteriaTextInput = ref('')
 const criteriaCommentInput = ref('')
 const criteriaItems = ref<CriteriaItem[]>([])
 
-function parseCriteriaItems(text?: string): CriteriaItem[] {
-  if (!text) return []
-  // Try JSON first (new format)
-  try {
-    const parsed = JSON.parse(text)
-    if (Array.isArray(parsed)) {
-      return parsed
-        .map((x: any) =>
-          typeof x === 'string'
-            ? { text: x, done: false }
-            : { text: String(x?.text ?? '').trim(), comment: x?.comment != null && String(x.comment).trim() !== '' ? String(x.comment) : undefined, done: Boolean(x?.done) }
-        )
-        .filter((i: CriteriaItem) => i.text)
-    }
-  } catch {
-    // ignore and try legacy
-  }
-  // Legacy: split by new lines or commas/semicolons -> text only
-  return text
-    .split(/[\n,;]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-    .map(t => ({ text: t }))
-}
 
 function resetCriteriaState(fromText: string = '') {
   criteriaItems.value = parseCriteriaItems(fromText)
@@ -311,6 +131,22 @@ function addCriteriaFromInput() {
 
 function removeCriteriaAt(index: number) {
   criteriaItems.value.splice(index, 1)
+}
+
+function updateCriteriaAt(index: number, text: string) {
+  if (index >= 0 && index < criteriaItems.value.length) {
+    criteriaItems.value[index].text = text
+  }
+}
+
+function onPdpModalSave(payload: Pdp) {
+  Object.assign(pdpForm, payload)
+  savePdp()
+}
+
+function onSkillModalSave(payload: PdpSkill) {
+  Object.assign(skillForm, payload)
+  saveSkill()
 }
 
 // Progress modal state
@@ -338,7 +174,7 @@ async function loadProgressEntries() {
     // keep text from server in case updated
     if (data.criterion?.text) progressState.text = data.criterion.text
   } catch (e: any) {
-    alert('Failed to load progress: ' + (e?.message || 'Error'))
+    notifyError('Failed to load progress: ' + (e?.message || 'Error'))
   } finally {
     progressState.loading = false
   }
@@ -355,19 +191,20 @@ async function addProgressNote() {
     progressState.newNote = ''
     await loadProgressEntries()
   } catch (e: any) {
-    alert('Failed to add progress entry: ' + (e?.message || 'Error'))
+    notifyError('Failed to add progress entry: ' + (e?.message || 'Error'))
   }
 }
 
 async function deleteProgressEntry(id: number) {
-  if (!confirm('Delete this progress entry?')) return
+  const ok = await confirmDialog('Delete this progress entry?')
+  if (!ok) return
   try {
     await http(`/pdps/${progressState.pdp_id}/skills/${progressState.skill_id}/criteria/${progressState.index}/progress/${id}.json`, {
       method: 'DELETE'
     })
     await loadProgressEntries()
   } catch (e: any) {
-    alert('Failed to delete entry: ' + (e?.message || 'Error'))
+    notifyError('Failed to delete entry: ' + (e?.message || 'Error'))
   }
 }
 
@@ -379,7 +216,7 @@ async function toggleCriterionDone(s: PdpSkill, index: number, done: boolean) {
     })
     if (selectedPdpId.value) await loadSkills(selectedPdpId.value)
   } catch (e: any) {
-    alert('Failed to update criterion state: ' + (e?.message || 'Error'))
+    notifyError('Failed to update criterion state: ' + (e?.message || 'Error'))
   }
 }
 
@@ -390,7 +227,7 @@ async function approveProgressEntry(id: number) {
     })
     await loadProgressEntries()
   } catch (e: any) {
-    alert('Failed to approve entry: ' + (e?.message || 'Error'))
+    notifyError('Failed to approve entry: ' + (e?.message || 'Error'))
   }
 }
 
@@ -670,7 +507,7 @@ function openEditPdp(p: Pdp) {
 }
 
 async function savePdp() {
-  if (!pdpForm.title.trim()) return alert('Please enter PDP title')
+  if (!pdpForm.title.trim()) { notifyError('Please enter PDP title'); return }
   const body = JSON.stringify({ title: pdpForm.title, description: pdpForm.description, priority: pdpForm.priority, eta: pdpForm.eta, status: pdpForm.status })
   if (editingPdpId.value) {
     await http(`/pdps/${editingPdpId.value}.json`, { method: 'PUT', body })
@@ -690,7 +527,7 @@ async function savePdp() {
 }
 
 async function deletePdp(id: number) {
-  if (!confirm('Delete this PDP and all its skills?')) return
+  { const ok = await confirmDialog('Delete this PDP and all its skills?'); if (!ok) return }
   await http(`/pdps/${id}.json`, { method: 'DELETE' })
   if (selectedPdpId.value === id) selectedPdpId.value = null
   await loadPdps()
@@ -714,7 +551,7 @@ function openEditSkill(s: PdpSkill) {
 
 async function saveSkill() {
   if (!selectedPdpId.value) return
-  if (!skillForm.skill.trim()) return alert('Please fill the "Skill to achieve" field')
+  if (!skillForm.skill.trim()) { notifyError('Please fill the "Skill to achieve" field'); return }
   // Serialize as JSON array of { text, comment } (backward compatible parser will read legacy)
   skillForm.criteria = JSON.stringify(criteriaItems.value)
   const body = JSON.stringify({ skill: skillForm.skill, description: skillForm.description, criteria: skillForm.criteria, priority: skillForm.priority, eta: skillForm.eta, status: skillForm.status })
@@ -729,7 +566,7 @@ async function saveSkill() {
 
 async function deleteSkill(id: number) {
   if (!selectedPdpId.value) return
-  if (!confirm('Delete this skill?')) return
+  { const ok = await confirmDialog('Delete this skill?'); if (!ok) return }
   await http(`/pdps/${selectedPdpId.value}/skills/${id}.json`, { method: 'DELETE' })
   await loadSkills(selectedPdpId.value)
 }
@@ -795,28 +632,28 @@ function closeUserDropdown() { showUserDropdown.value = false }
 async function assignCurator() {
   const email = curatorEmail.value.trim()
   if (!selectedPdpId.value) return
-  if (!email || !email.includes('@')) return alert('Enter a valid email')
+  if (!email || !email.includes('@')) { notifyError('Enter a valid email'); return }
   try {
     const res = await http(`/pdps/${selectedPdpId.value}/assign-curator.json`, { method: 'POST', body: JSON.stringify({ email }) })
     if (res?.curator) {
       const exists = curators.value.some(c => c.id === res.curator.id)
       if (!exists) curators.value.push(res.curator as Curator)
     }
-    alert('Curator assigned')
+    notifySuccess('Curator assigned')
     curatorEmail.value = ''
   } catch (e: any) {
-    alert('Failed to assign curator: ' + (e?.message || 'Error'))
+    notifyError('Failed to assign curator: ' + (e?.message || 'Error'))
   }
 }
 
 async function removeCurator(c: Curator) {
   if (!selectedPdpId.value) return
-  if (!confirm(`Remove ${c.name || c.email} from curators?`)) return
+  { const ok = await confirmDialog(`Remove ${c.name || c.email} from curators?`); if (!ok) return }
   try {
     await http(`/pdps/${selectedPdpId.value}/curators/${c.id}.json`, { method: 'DELETE' })
     curators.value = curators.value.filter(x => x.id !== c.id)
   } catch (e: any) {
-    alert('Failed to remove curator: ' + (e?.message || 'Error'))
+    notifyError('Failed to remove curator: ' + (e?.message || 'Error'))
   }
 }
 
@@ -857,18 +694,6 @@ onMounted(async () => {
     }
   }
 })
-function statusBadgeClass(status: string): string {
-  switch (status) {
-    case 'Done':
-      return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-    case 'In Progress':
-      return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-    case 'Blocked':
-      return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-    default: // Planned or any other
-      return 'bg-muted text-muted-foreground'
-  }
-}
 
 </script>
 
@@ -1007,10 +832,10 @@ function statusBadgeClass(status: string): string {
                       <td class="px-3 py-3">
                         <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-wrap gap-1.5">
                           <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="inline-flex items-center gap-1">
-                            <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
-                              <span>{{ c.text }}</span>
-                              <span v-if="c.comment" class="text-muted-foreground">•</span>
-                            </button>
+                              <button type="button" class="inline-flex items-start gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer w-72 md:w-80 lg:w-66 text-center" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
+                                  <span class="flex-1 min-w-0 whitespace-normal break-words leading-snug">{{ c.text }}</span>
+                                  <span v-if="c.comment" class="text-muted-foreground shrink-0 self-start mt-0.5">•</span>
+                              </button>
                             <button v-if="selectedPdpIsEditable" type="button" class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
                               <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
                                 <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
@@ -1091,116 +916,25 @@ function statusBadgeClass(status: string): string {
       </div>
 
       <!-- PDP Modal -->
-      <div v-if="showPdpModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div class="w-full max-w-2xl rounded-xl border border-border bg-background p-4 shadow-xl">
-          <div class="mb-3 flex items-center justify-between">
-            <h3 class="text-base font-semibold">{{ editingPdpId ? 'Edit PDP' : 'Create PDP' }}</h3>
-            <button class="rounded p-1 text-muted-foreground hover:bg-muted" @click="showPdpModal=false">✕</button>
-          </div>
-
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div>
-              <label class="mb-1 block text-xs font-medium">PDP Title</label>
-              <input v-model="pdpForm.title" type="text" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="e.g. Promotion to Senior" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium">Prio</label>
-              <select v-model="pdpForm.priority" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm">
-                <option>Low</option>
-                <option>Medium</option>
-                <option>High</option>
-              </select>
-            </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium">ETA</label>
-              <input v-model="pdpForm.eta" type="text" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="e.g. Q4 2025 or 31.12.2025" />
-            </div>
-            <div>
-              <label class="mb-1 block text-xs font-medium">Status</label>
-              <select v-model="pdpForm.status" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm">
-                <option>Planned</option>
-                <option>In Progress</option>
-                <option>Done</option>
-                <option>Blocked</option>
-              </select>
-            </div>
-            <div class="md:col-span-2">
-              <label class="mb-1 block text-xs font-medium">Description</label>
-              <textarea v-model="pdpForm.description" rows="4" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="Short description of this plan"></textarea>
-            </div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2">
-            <button class="rounded border px-3 py-2 text-sm hover:bg-muted" @click="showPdpModal=false">Cancel</button>
-            <button class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90" @click="savePdp">Save</button>
-          </div>
-        </div>
-      </div>
+      <PdpFormModal
+        v-model:open="showPdpModal"
+        :form="pdpForm"
+        :editing-id="editingPdpId"
+        @save="onPdpModalSave"
+      />
 
       <!-- Skill Modal -->
-      <div v-if="showSkillModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-        <div class="w-full max-w-3xl rounded-xl border border-border bg-background p-4 shadow-xl">
-          <div class="mb-3 flex items-center justify-between">
-            <h3 class="text-base font-semibold">{{ editingSkillId ? 'Edit Skill' : 'Add Skill' }}</h3>
-            <button class="rounded p-1 text-muted-foreground hover:bg-muted" @click="showSkillModal=false">✕</button>
-          </div>
-
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">Skill to achieve</label>
-              <input v-model="skillForm.skill" type="text" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="e.g. Intermediate level of English" />
-            </div>
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">Prio</label>
-              <select v-model="skillForm.priority" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm">
-                <option>Low</option>
-                <option>Medium</option>
-                <option>High</option>
-              </select>
-            </div>
-
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">ETA</label>
-              <input v-model="skillForm.eta" type="text" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="e.g. Q4 2025 or 31.12.2025" />
-            </div>
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">Status</label>
-              <select v-model="skillForm.status" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm">
-                <option>Planned</option>
-                <option>In Progress</option>
-                <option>Done</option>
-                <option>Blocked</option>
-              </select>
-            </div>
-
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">Description</label>
-              <textarea v-model="skillForm.description" rows="6" class="w-full rounded-md border bg-transparent px-3 py-2 text-sm" placeholder="Short description"></textarea>
-            </div>
-            <div class="md:col-span-1">
-              <label class="mb-1 block text-xs font-medium">Win Criteria</label>
-              <div class="rounded-md border px-2 py-2 space-y-2">
-                <div v-if="criteriaItems.length" class="space-y-2">
-                  <div v-for="(item, i) in criteriaItems" :key="i" class="flex gap-2 items-start">
-                    <input v-model="item.text" type="text" class="flex-1 rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="Criterion" />
-                    <button type="button" class="rounded border px-2 py-1 text-[11px]" @click="removeCriteriaAt(i)">Remove</button>
-                  </div>
-                </div>
-                <div class="flex gap-2 items-start">
-                  <input v-model="criteriaTextInput" @keydown.enter.prevent="addCriteriaFromInput" type="text" class="flex-1 bg-transparent px-2 py-1 text-sm border rounded-md" placeholder="New criterion" />
-                  <button type="button" class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90" @click="addCriteriaFromInput">Add</button>
-                </div>
-                <p class="text-[11px] text-muted-foreground">Comments can be added while working by clicking the criterion badge.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2">
-            <button class="rounded border px-3 py-2 text-sm hover:bg-muted" @click="showSkillModal=false">Cancel</button>
-            <button class="rounded bg-primary px-3 py-2 text-sm text-primary-foreground hover:opacity-90" @click="saveSkill">Save</button>
-          </div>
-        </div>
-      </div>
+      <SkillFormModal
+        v-model:open="showSkillModal"
+        :form="skillForm"
+        :criteria-items="criteriaItems"
+        :criteria-text-input="criteriaTextInput"
+        :add-criteria-from-input="addCriteriaFromInput"
+        :remove-criteria-at="removeCriteriaAt"
+        :update-criteria-at="updateCriteriaAt"
+        @save="onSkillModalSave"
+        @update:criteria-text-input="val => (criteriaTextInput = val)"
+      />
 
       <!-- Criterion Progress Modal -->
       <div v-if="showProgressModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
