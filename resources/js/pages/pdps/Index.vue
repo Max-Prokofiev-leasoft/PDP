@@ -855,9 +855,6 @@ onMounted(async () => {
         openProgressModal(s, deepCriterion)
       }
     }
-  } else if (!selectedPdpId.value) {
-    if (pdps.value.length) selectPdp(pdps.value[0].id)
-    else if (sharedPdps.value.length) selectPdpFromShared(sharedPdps.value[0].id)
   }
 })
 function statusBadgeClass(status: string): string {
@@ -887,7 +884,7 @@ function statusBadgeClass(status: string): string {
         <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
           <div class="mb-3 flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <h2 class="text-base font-semibold">Your PDPs</h2>
+              <h2 class="text-base font-semibold flex items-center gap-2">Your PDPs <span class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] leading-none min-w-[18px] text-muted-foreground">{{ pdps.length }}</span></h2>
               <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseOwned=!collapseOwned" :title="collapseOwned ? 'Expand' : 'Collapse'" :aria-label="collapseOwned ? 'Expand' : 'Collapse'">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseOwned ? '-rotate-90' : 'rotate-0'">
                   <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
@@ -917,12 +914,12 @@ function statusBadgeClass(status: string): string {
             </div>
             <p v-else class="text-sm text-muted-foreground">The list is empty. Add the first PDP.</p>
           </div>
-          <p v-else class="text-xs text-muted-foreground">Collapsed</p>
+          <div v-else class="my-2 h-px bg-border"></div>
 
           <div class="mt-6">
             <div class="mb-3 flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold">Shared PDPs</h2>
+                <h2 class="text-base font-semibold flex items-center gap-2">Shared PDPs <span class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] leading-none min-w-[18px] text-muted-foreground">{{ sharedPdps.length }}</span></h2>
                 <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseShared=!collapseShared" :title="collapseShared ? 'Expand' : 'Collapse'" :aria-label="collapseShared ? 'Expand' : 'Collapse'">
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseShared ? '-rotate-90' : 'rotate-0'">
                     <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
@@ -943,7 +940,7 @@ function statusBadgeClass(status: string): string {
               </div>
               <p v-else class="text-sm text-muted-foreground">No shared PDPs yet.</p>
             </div>
-            <p v-else class="text-xs text-muted-foreground">Collapsed</p>
+            <div v-else class="my-2 h-px bg-border"></div>
           </div>
         </div>
 
@@ -963,6 +960,7 @@ function statusBadgeClass(status: string): string {
           <!-- Manage tab content -->
           <template v-if="activeTab==='Manage'">
             <template v-if="selectedPdp">
+              <h3 class="mb-1 text-lg font-semibold">{{ selectedPdp.title }}</h3>
               <p class="mb-3 text-sm text-muted-foreground">{{ selectedPdp.description }}</p>
               <p v-if="selectedPdpIsCurator && (selectedPdp as any)?.user" class="-mt-2 mb-3 text-[11px] text-muted-foreground">Owner: {{ (selectedPdp as any).user.name || (selectedPdp as any).user.email }}<span v-if="(selectedPdp as any).user.name"> ({{ (selectedPdp as any).user.email }})</span></p>
 
@@ -981,10 +979,10 @@ function statusBadgeClass(status: string): string {
                   <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" @click="assignCurator">Assign curator</button>
                 </div>
                 <div v-if="curators.length" class="mt-2 flex flex-wrap gap-2">
-                  <span v-for="c in curators" :key="c.id" class="inline-flex items-center gap-2 rounded-full border px-2 py-0.5 text-xs">
+                  <span v-for="c in curators" :key="c.id" class="inline-flex items-center gap-2 rounded-md border px-2 py-0.5 text-xs">
                     <span class="font-medium">{{ c.name || c.email }}</span>
                     <span v-if="c.name" class="text-muted-foreground">{{ c.email }}</span>
-                    <button class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-full border text-[11px] hover:bg-muted" title="Remove curator" @click="removeCurator(c)">×</button>
+                    <button class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[11px] hover:bg-muted" title="Remove curator" @click="removeCurator(c)">×</button>
                   </span>
                 </div>
               </div>
@@ -1009,11 +1007,11 @@ function statusBadgeClass(status: string): string {
                       <td class="px-3 py-3">
                         <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-wrap gap-1.5">
                           <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="inline-flex items-center gap-1">
-                            <button type="button" class="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
+                            <button type="button" class="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-2 py-0.5 text-xs hover:bg-muted/70 cursor-pointer" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
                               <span>{{ c.text }}</span>
                               <span v-if="c.comment" class="text-muted-foreground">•</span>
                             </button>
-                            <button v-if="selectedPdpIsEditable" type="button" class="inline-flex items-center justify-center rounded-full border px-1.5 py-0.5 text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
+                            <button v-if="selectedPdpIsEditable" type="button" class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
                               <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
                                 <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
                               </svg>
@@ -1028,7 +1026,7 @@ function statusBadgeClass(status: string): string {
                       <td class="px-3 py-3">{{ s.priority }}</td>
                       <td class="px-3 py-3">{{ s.eta }}</td>
                       <td class="px-3 py-3">
-                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap" :class="statusBadgeClass(s.status)">
+                        <span class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] whitespace-nowrap" :class="statusBadgeClass(s.status)">
                           {{ s.status }}
                         </span>
                       </td>
@@ -1050,6 +1048,7 @@ function statusBadgeClass(status: string): string {
           <!-- Annex tab content -->
           <template v-else>
             <template v-if="selectedPdp">
+              <h3 class="mb-3 text-lg font-semibold">{{ selectedPdp.title }}</h3>
               <div v-if="(annex?.skills || []).length" class="grid grid-cols-1 gap-4 md:grid-cols-4">
                 <!-- Sidebar: skills list -->
                 <div class="md:col-span-1 border rounded-md p-2 max-h-[60vh] overflow-auto">
@@ -1228,7 +1227,7 @@ function statusBadgeClass(status: string): string {
                       <div class="flex items-center gap-2">
                         <span>{{ e.user?.name || 'You' }} · {{ formatKyivDateTime(e.created_at) }}</span>
                         <span
-                          class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px]"
+                          class="inline-flex items-center rounded-md px-2 py-0.5 text-[10px]"
                           :class="e.approved ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'"
                         >{{ e.approved ? 'Approved' : 'Pending' }}</span>
                       </div>
