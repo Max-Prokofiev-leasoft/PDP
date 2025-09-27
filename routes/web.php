@@ -4,6 +4,8 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use App\Http\Controllers\PdpController;
 use App\Http\Controllers\PdpSkillController;
+use App\Http\Controllers\PdpProgressController;
+use App\Http\Controllers\UserProfessionalLevelController;
 
 Route::get('/', function () {
     if (auth()->check()) {
@@ -41,6 +43,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::delete('/pdps/{pdp}/curators/{user}.json', [PdpController::class, 'removeCurator']);
     Route::get('/pdps/{pdp}.json', [PdpController::class, 'show']);
     Route::get('/pdps/{pdp}/export.json', [PdpController::class, 'export']);
+    Route::post('/pdps/{pdp}/transfer.json', [PdpController::class, 'transfer']);
     Route::post('/pdps/import.json', [PdpController::class, 'import']);
     Route::put('/pdps/{pdp}.json', [PdpController::class, 'update']);
     Route::delete('/pdps/{pdp}.json', [PdpController::class, 'destroy']);
@@ -66,10 +69,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/dashboard/pending-approvals.json', [PdpSkillController::class, 'pendingApprovals']);
     // Dashboard: PDP summary (KPI tiles + per-skill breakdown)
     Route::get('/dashboard/pdps/{pdp}/summary.json', [PdpSkillController::class, 'summary']);
-    // Dashboard: recent closures (approved entries) in the last 5 days; optional ?pdp={id}
-    Route::get('/dashboard/recent-closures.json', [PdpSkillController::class, 'recentClosures']);
     // Dashboard: My PDPs snapshot overview
     Route::get('/dashboard/pdps/overview.json', [PdpController::class, 'overview']);
+
+    // PDP progress by closed skills (Done)
+    Route::get('/pdps/{pdp}/progress.json', [PdpProgressController::class, 'show']);
+
+    // User professional level (global, based on closed skills across all PDPs)
+    Route::get('/profile/pro-level.json', [UserProfessionalLevelController::class, 'show']);
 
     Route::delete('/pdps/{pdp}/skills/{skill}.json', [PdpSkillController::class, 'destroy']);
 });

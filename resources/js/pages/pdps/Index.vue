@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, watch, onBeforeUnmount } from 'vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head } from '@inertiajs/vue3'
@@ -272,24 +272,6 @@ function filenameSafe(input: string): string {
   return (input || 'PDP').replace(/[^\w\-\s]+/g, '').replace(/\s+/g, '_').slice(0, 60)
 }
 
-async function downloadPdpTemplate() {
-  if (!selectedPdpId.value || !selectedPdp.value) return
-  try {
-    const data = await http(`/pdps/${selectedPdpId.value}/export.json`)
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    const name = `PDP_Template_${filenameSafe(selectedPdp.value.title)}.json`
-    a.href = url
-    a.download = name
-    document.body.appendChild(a)
-    a.click()
-    URL.revokeObjectURL(url)
-    a.remove()
-  } catch (e: any) {
-    alert('Failed to export PDP: ' + (e?.message || 'Error'))
-  }
-}
 
 // Build a PDF document for the current Annex data (using jsPDF)
 async function buildAnnexPdf(JsPDFCtor: any, data: any) {
@@ -579,14 +561,32 @@ function selectPdpFromShared(id: number) {
 }
 
 const curatorEmail = ref('')
+const selectedUserId = ref<number | null>(null)
 const userSearch = ref('')
 const userOptions = ref<Curator[]>([])
 const showUserDropdown = ref(false)
 let userSearchTimer: number | null = null
 
+// Close dropdown on click outside of the picker area
+const userPickerRef = ref<HTMLElement | null>(null)
+function onDocClick(e: MouseEvent) {
+  const el = userPickerRef.value
+  if (!el) return
+  const target = e.target as Node | null
+  if (target && !el.contains(target)) {
+    showUserDropdown.value = false
+  }
+}
+onMounted(() => document.addEventListener('click', onDocClick))
+onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+
+
 watch(curatorEmail, (v) => {
+  selectedUserId.value = null
   userSearch.value = v
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v || '')
   if (!v || v.length < 1) { userOptions.value = []; showUserDropdown.value = false; return }
+  if (isEmail) { showUserDropdown.value = false; return }
   if (userSearchTimer) clearTimeout(userSearchTimer as any)
   userSearchTimer = window.setTimeout(async () => {
     try {
@@ -602,6 +602,7 @@ watch(curatorEmail, (v) => {
 
 function selectUserOption(u: Curator) {
   curatorEmail.value = u.email
+  selectedUserId.value = u.id
   showUserDropdown.value = false
 }
 
@@ -632,6 +633,33 @@ async function removeCurator(c: Curator) {
     curators.value = curators.value.filter(x => x.id !== c.id)
   } catch (e: any) {
     notifyError('Failed to remove curator: ' + (e?.message || 'Error'))
+  }
+}
+
+async function shareToUser() {
+  if (!selectedPdpId.value) return
+  if (!selectedPdpIsOwner.value) { notifyError('Only the owner can share the PDP'); return }
+  const email = curatorEmail.value.trim()
+  let userId = selectedUserId.value
+  try {
+    if (!userId) {
+      const exact = userOptions.value.find(u => (u.email || '').toLowerCase() === email.toLowerCase())
+      if (exact) { userId = exact.id }
+    }
+    if (!userId && email) {
+      const data = await http('/users.search.json?q=' + encodeURIComponent(email))
+      const arr = Array.isArray(data) ? data : []
+      const found = arr.find((u: any) => (u.email || '').toLowerCase() === email.toLowerCase())
+      if (found) { userId = found.id }
+    }
+    if (!userId) { notifyError('Select a user from the dropdown to share'); return }
+
+    await http(`/pdps/${selectedPdpId.value}/transfer.json`, { method: 'POST', body: JSON.stringify({ user_id: userId }) })
+    notifySuccess('PDP shared. The user will see a copy in their list.')
+    curatorEmail.value = ''
+    selectedUserId.value = null
+  } catch (e: any) {
+    notifyError('Failed to share: ' + (e?.message || 'Error'))
   }
 }
 
@@ -750,7 +778,6 @@ onMounted(async () => {
           <div class="mb-3 flex items-center justify-end">
             <div v-if="selectedPdp && activeTab==='Manage' && selectedPdpIsEditable" class="flex gap-2">
               <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="openEditPdp(selectedPdp as any)">Edit PDP</button>
-              <button class="rounded-md border px-3 py-2 text-xs hover:bg-muted" @click="downloadPdpTemplate">Export JSON</button>
               <button class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreateSkill">+ Add Skill</button>
             </div>
             <div v-if="selectedPdp && activeTab==='Annex' && (annex?.skills || []).length">
@@ -765,10 +792,10 @@ onMounted(async () => {
               <p class="mb-3 text-sm text-muted-foreground">{{ selectedPdp.description }}</p>
               <p v-if="selectedPdpIsCurator && (selectedPdp as any)?.user" class="-mt-2 mb-3 text-[11px] text-muted-foreground">Owner: {{ (selectedPdp as any).user.name || (selectedPdp as any).user.email }}<span v-if="(selectedPdp as any).user.name"> ({{ (selectedPdp as any).user.email }})</span></p>
 
-              <div v-if="activeTab==='Manage' && selectedPdpIsOwner" class="mb-4">
+              <div v-if="activeTab==='Manage' && selectedPdpIsOwner" class="mb-4" id="pdp-share">
                 <div class="flex items-center gap-2">
-                  <div class="relative">
-                    <input v-model="curatorEmail" @focus="showUserDropdown = userOptions.length>0" @blur="setTimeout(()=>closeUserDropdown(),100)" type="text" placeholder="Enter curator email or name" class="w-64 rounded border px-2 py-1 text-sm" />
+                  <div class="relative" ref="userPickerRef">
+                    <input v-model="curatorEmail" @focus="showUserDropdown = userOptions.length>0" @blur="setTimeout(()=>closeUserDropdown(),100)" @keydown.enter.prevent="closeUserDropdown()" @keydown.esc.prevent="closeUserDropdown()" type="text" placeholder="Enter curator email or name" class="w-64 rounded border px-2 py-1 text-sm" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" name="curatorSearch" inputmode="text" />
                     <ul v-if="showUserDropdown" class="absolute z-10 mt-1 max-h-56 w-[22rem] overflow-auto rounded-md border bg-background shadow">
                       <li v-for="u in userOptions" :key="u.id" class="flex cursor-pointer items-center justify-between px-2 py-1 text-sm hover:bg-muted" @mousedown.prevent="selectUserOption(u)">
                         <span class="font-medium">{{ u.name || u.email }}</span>
@@ -778,6 +805,12 @@ onMounted(async () => {
                     </ul>
                   </div>
                   <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" @click="assignCurator">Assign curator</button>
+                                    <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted inline-flex items-center gap-1" title="Share a copy of this PDP to the selected user" @click="shareToUser">
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
+                                        <path d="M15 8a3 3 0 10-2.83-4H12a3 3 0 102.17 5.03l-6.1 3.05a3 3 0 100 1.84l6.1 3.05A3 3 0 1015 12a3 3 0 00-2.17.97l-6.1-3.05A3 3 0 0012 8h.17A2.99 2.99 0 0015 8z"/>
+                                      </svg>
+                                      <span>Share PDP</span>
+                                    </button>
                 </div>
                 <div v-if="curators.length" class="mt-2 flex flex-wrap gap-2">
                   <span v-for="c in curators" :key="c.id" class="inline-flex items-center gap-2 rounded-md border px-2 py-0.5 text-xs">

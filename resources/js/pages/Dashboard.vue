@@ -123,30 +123,34 @@ const summary = ref<PdpSummary | null>(null)
 const summaryLoading = ref(false)
 const summaryError = ref('')
 
-// Recent closures (last 5 days)
-interface RecentClosure {
-  id: number
-  pdp: { id: number; title: string }
-  skill: { id: number; name: string }
-  criterion: { index: number; text: string }
-  note: string
-  closed_at: string
-}
-const recent = ref<RecentClosure[] | null>(null)
-const recentLoading = ref(false)
-const recentError = ref('')
 
-async function loadRecent() {
-  recentLoading.value = true
-  recentError.value = ''
+// Professional level (global, based on closed skills across all PDPs)
+interface ProLevel {
+  key: string
+  title: string
+  index: number
+  closed_skills: number
+  current_threshold: number
+  next_threshold: number | null
+  percent: number
+  remaining_to_next: number | null
+  at_max: boolean
+  levels?: { key: string; title: string; threshold: number }[]
+}
+const proLevel = ref<ProLevel | null>(null)
+const proLevelLoading = ref(false)
+const proLevelError = ref('')
+
+async function loadProLevel() {
+  proLevelLoading.value = true
+  proLevelError.value = ''
   try {
-    const q = selectedPdpId.value ? `?pdp=${selectedPdpId.value}` : ''
-    recent.value = await http(`/dashboard/recent-closures.json${q}`)
+    proLevel.value = await http('/profile/pro-level.json')
   } catch (e: any) {
-    recentError.value = e?.message || 'Failed to load recent closures'
-    recent.value = []
+    proLevelError.value = e?.message || 'Failed to load level'
+    proLevel.value = null
   } finally {
-    recentLoading.value = false
+    proLevelLoading.value = false
   }
 }
 
@@ -182,9 +186,9 @@ async function loadSummary() {
   }
 }
 
-watch(selectedPdpId, () => { loadSummary(); loadRecent() })
+watch(selectedPdpId, () => { loadSummary() })
 
-onMounted(() => { loadOverview(); loadPending(); loadPdps().then(() => { loadSummary(); loadRecent() }) })
+onMounted(() => { loadOverview(); loadPending(); loadProLevel(); loadPdps().then(() => { loadSummary() }) })
 </script>
 
 <template>
@@ -232,33 +236,34 @@ onMounted(() => { loadOverview(); loadPending(); loadPdps().then(() => { loadSum
                     <div v-else class="text-xs text-muted-foreground">No available PDPs.</div>
                   </div>
                 </div>
-                <!-- Middle-top: Recently closed (last 5 days) -->
+                <!-- Middle-top: Professional level only (PDP progress removed) -->
                 <div class="relative overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border p-3">
                   <div class="mb-2 flex items-center justify-between gap-2">
-                    <h3 class="text-sm font-semibold">Closed in last 5 days</h3>
-                    <div class="flex items-center gap-2">
-                      <button class="rounded border px-2 py-0.5 text-[11px] hover:bg-muted" @click="loadRecent">Refresh</button>
-                    </div>
+                    <h3 class="text-sm font-semibold">Professional level</h3>
+                    <button class="rounded border px-2 py-0.5 text-[11px] hover:bg-muted" @click="loadProLevel">Refresh</button>
                   </div>
-                  <div v-if="recentLoading" class="text-xs text-muted-foreground">Loading…</div>
-                  <div v-else-if="recentError" class="text-xs text-destructive">{{ recentError }}</div>
-                  <div v-else>
-                    <div v-if="(recent || []).length" class="max-h-64 overflow-auto divide-y">
-                      <div v-for="it in (recent || [])" :key="it.id" class="py-2 text-sm">
-                        <div class="flex items-center justify-between gap-2">
-                          <div class="truncate">
-                            <div class="font-medium truncate">{{ it.pdp.title }}</div>
-                            <div class="text-[11px] text-muted-foreground truncate">{{ it.skill.name }} • {{ it.criterion.text }}</div>
-                          </div>
-                          <div class="text-[11px] text-muted-foreground whitespace-nowrap">{{ formatKyivDateTime(it.closed_at) }}</div>
-                        </div>
-                        <div class="mt-2">
-                          <a :href="`/pdps?tab=manage&pdp=${it.pdp.id}&skill=${it.skill.id}&criterion=${it.criterion.index}`" class="rounded border px-2 py-0.5 text-[11px] hover:bg-muted">Open PDP</a>
-                        </div>
+                  <div v-if="proLevelLoading" class="text-xs text-muted-foreground">Loading…</div>
+                  <div v-else-if="proLevelError" class="text-xs text-destructive">{{ proLevelError }}</div>
+                  <div v-else-if="proLevel" class="space-y-1">
+                    <div class="flex items-center justify-between">
+                      <div class="text-[12px]">
+                        <span class="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">{{ proLevel.title }}</span>
+                      </div>
+                      <div class="text-[11px] text-muted-foreground">
+                        {{ proLevel.closed_skills }} skills
+                        <template v-if="!proLevel.at_max && proLevel.next_threshold != null">
+                          · next at {{ proLevel.next_threshold }}
+                        </template>
                       </div>
                     </div>
-                    <div v-else class="text-xs text-muted-foreground">No closures in the last 5 days.</div>
+                    <div class="h-2 w-full overflow-hidden rounded bg-muted">
+                      <div class="h-full bg-green-500 transition-all" :style="{ width: (proLevel ? proLevel.percent : 0) + '%' }"></div>
+                    </div>
+                    <div class="text-[11px] text-muted-foreground" v-if="!proLevel.at_max && proLevel.remaining_to_next != null">
+                      {{ proLevel.remaining_to_next }} to next level
+                    </div>
                   </div>
+                  <div v-else class="text-xs text-muted-foreground">No level data.</div>
                 </div>
                 <!-- Right-top: Pending approvals list -->
                 <div class="relative overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border p-3">

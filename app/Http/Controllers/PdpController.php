@@ -141,6 +141,43 @@ class PdpController extends Controller
         return $items;
     }
 
+    private function normalizeCriteriaForTransfer(string $raw): ?string
+    {
+        $items = [];
+        try {
+            $parsed = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($parsed)) {
+                foreach ($parsed as $it) {
+                    if (is_string($it)) {
+                        $text = trim($it);
+                        if ($text !== '') {
+                            $items[] = ['text' => $text, 'done' => false];
+                        }
+                    } elseif (is_array($it)) {
+                        $text = isset($it['text']) ? trim((string)$it['text']) : '';
+                        if ($text !== '') {
+                            $items[] = ['text' => $text, 'comment' => null, 'done' => false];
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+        if (empty($items)) {
+            $parts = array_filter(array_map('trim', preg_split('/[\n,;]+/', $raw) ?: []));
+            foreach ($parts as $t) {
+                if ($t !== '') {
+                    $items[] = ['text' => $t, 'done' => false];
+                }
+            }
+        }
+        if (empty($items)) {
+            return null;
+        }
+        return json_encode($items, JSON_UNESCAPED_UNICODE);
+    }
+
     public function assignCurator(Request $request, Pdp $pdp)
     {
         $this->authorizeAccess($request, $pdp);
@@ -320,6 +357,48 @@ class PdpController extends Controller
                 'order_column' => $s['order_column'] ?? $order,
             ]);
             $order++;
+        }
+
+        return response()->json($new->fresh()->loadCount('skills'), Response::HTTP_CREATED);
+    }
+
+    // Transfer PDP to another user (no progress and no done checkmarks)
+    public function transfer(Request $request, Pdp $pdp)
+    {
+        $this->authorizeAccess($request, $pdp);
+        $payload = $request->validate([
+            'user_id' => ['required','integer','exists:users,id'],
+        ]);
+
+        $targetUserId = (int) $payload['user_id'];
+        // If attempting to transfer to the same owner, just deny to avoid duplicates
+        if ($targetUserId === (int)$pdp->user_id) {
+            return response()->json(['message' => 'Cannot transfer to the same owner'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        // Create new PDP under target user with reset timeline/status
+        $new = Pdp::create([
+            'user_id' => $targetUserId,
+            'title' => (string)$pdp->title,
+            'description' => $pdp->description,
+            'priority' => (string)$pdp->priority,
+            'eta' => null,
+            'status' => 'Planned',
+        ]);
+
+        // Copy skills with reset eta/status and criteria checkmarks removed
+        $skills = $pdp->skills()->orderBy('order_column')->orderBy('id')->get();
+        foreach ($skills as $index => $s) {
+            PdpSkill::create([
+                'pdp_id' => $new->id,
+                'skill' => (string)$s->skill,
+                'description' => $s->description,
+                'criteria' => $this->normalizeCriteriaForTransfer((string)($s->criteria ?? '')),
+                'priority' => (string)$s->priority,
+                'eta' => null,
+                'status' => 'Planned',
+                'order_column' => $s->order_column ?? $index,
+            ]);
         }
 
         return response()->json($new->fresh()->loadCount('skills'), Response::HTTP_CREATED);
