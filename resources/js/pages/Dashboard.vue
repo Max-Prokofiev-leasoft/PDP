@@ -311,7 +311,7 @@ onMounted(() => { loadOverview(); loadPending(); loadProLevel(); loadPdps().then
               <div v-else>
                 <div v-if="summary" class="space-y-3">
                   <!-- KPI tiles -->
-                  <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+                  <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
                     <div class="rounded-lg border p-3">
                       <div class="text-[11px] text-muted-foreground">Total criteria</div>
                       <div class="mt-1 text-xl font-semibold">{{ summary.totalCriteria }}</div>
@@ -323,11 +323,6 @@ onMounted(() => { loadOverview(); loadPending(); loadProLevel(); loadPdps().then
                     <div class="rounded-lg border p-3">
                       <div class="text-[11px] text-muted-foreground">Remaining</div>
                       <div class="mt-1 text-xl font-semibold">{{ summary.pendingCount }}</div>
-                    </div>
-                    <div class="rounded-lg border p-3">
-                      <div class="text-[11px] text-muted-foreground">Median time to approval</div>
-                      <div class="mt-1 text-xl font-semibold">{{ summary.medianApproveHours != null ? summary.medianApproveHours + ' h' : '—' }}</div>
-                      <div class="text-[11px] text-muted-foreground" v-if="summary.avgApproveHours != null">Ø {{ summary.avgApproveHours }} h</div>
                     </div>
                   </div>
                   <!-- Skills breakdown (per-skill closed/opened) -->

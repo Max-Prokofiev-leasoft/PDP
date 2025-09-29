@@ -129,7 +129,7 @@ function onSkillModalSave(payload: PdpSkill) {
 
 // Progress modal state
 const showProgressModal = ref(false)
-const progressState = reactive<{ pdp_id: number; skill_id: number; index: number; text: string; entries: Array<{id:number; note:string; approved?: boolean; created_at:string; user?:{id:number; name:string; email:string}}>; newNote: string; loading: boolean }>({ pdp_id: 0, skill_id: 0, index: 0, text: '', entries: [], newNote: '', loading: false })
+const progressState = reactive<{ pdp_id: number; skill_id: number; index: number; text: string; entries: Array<{id:number; note:string; approved?: boolean; created_at:string; curator_comment?: string | null; user?:{id:number; name:string; email:string}}>; newNote: string; loading: boolean; editingCommentId: number | null; commentDrafts: Record<number, string>; editingNoteId: number | null; noteDrafts: Record<number, string> }>({ pdp_id: 0, skill_id: 0, index: 0, text: '', entries: [], newNote: '', loading: false, editingCommentId: null, commentDrafts: {}, editingNoteId: null, noteDrafts: {} })
 
 async function openProgressModal(s: PdpSkill, index: number) {
   const items = parseCriteriaItems(s.criteria)
@@ -149,6 +149,16 @@ async function loadProgressEntries() {
   try {
     const data = await http(`/pdps/${progressState.pdp_id}/skills/${progressState.skill_id}/criteria/${progressState.index}/progress.json`)
     progressState.entries = data.entries || []
+    progressState.editingCommentId = null
+    progressState.commentDrafts = {}
+    progressState.editingNoteId = null
+    progressState.noteDrafts = {}
+    for (const it of progressState.entries) {
+      if (it && typeof it.id === 'number') {
+        progressState.commentDrafts[it.id] = String(it.curator_comment || '')
+        progressState.noteDrafts[it.id] = String(it.note || '')
+      }
+    }
     // keep text from server in case updated
     if (data.criterion?.text) progressState.text = data.criterion.text
   } catch (e: any) {
@@ -196,6 +206,51 @@ async function toggleCriterionDone(s: PdpSkill, index: number, done: boolean) {
   } catch (e: any) {
     notifyError('Failed to update criterion state: ' + (e?.message || 'Error'))
   }
+}
+
+async function saveCuratorComment(id: number) {
+  try {
+    const comment = (progressState.commentDrafts[id] || '').trim()
+    await http(`/pdps/${progressState.pdp_id}/skills/${progressState.skill_id}/criteria/${progressState.index}/progress/${id}/comment.json`, {
+      method: 'PATCH',
+      body: JSON.stringify({ comment })
+    })
+    progressState.editingCommentId = null
+    await loadProgressEntries()
+  } catch (e: any) {
+    notifyError('Failed to save comment: ' + (e?.message || 'Error'))
+  }
+}
+
+function editCommentFor(id: number) {
+  progressState.editingCommentId = id
+}
+
+function cancelEditComment() {
+  progressState.editingCommentId = null
+}
+
+async function saveOwnerNote(id: number) {
+  try {
+    const note = (progressState.noteDrafts[id] || '').trim()
+    if (!note) { notifyError('Note cannot be empty'); return }
+    await http(`/pdps/${progressState.pdp_id}/skills/${progressState.skill_id}/criteria/${progressState.index}/progress/${id}.json`, {
+      method: 'PATCH',
+      body: JSON.stringify({ note })
+    })
+    progressState.editingNoteId = null
+    await loadProgressEntries()
+  } catch (e: any) {
+    notifyError('Failed to save entry: ' + (e?.message || 'Error'))
+  }
+}
+
+function editNoteFor(id: number) {
+  progressState.editingNoteId = id
+}
+
+function cancelEditNote() {
+  progressState.editingNoteId = null
 }
 
 async function approveProgressEntry(id: number) {
@@ -976,10 +1031,30 @@ onMounted(async () => {
                       </div>
                       <div class="flex items-center gap-1">
                         <button v-if="!e.approved && selectedPdpIsCurator" class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="approveProgressEntry(e.id)">Approve</button>
+                        <button v-if="!e.approved && selectedPdpIsCurator" class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="editCommentFor(e.id)">Comment</button>
+                        <button v-if="!e.approved && selectedPdpIsOwner" class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="editNoteFor(e.id)">Edit</button>
                         <button v-if="selectedPdpIsOwner" class="rounded border px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteProgressEntry(e.id)">Delete</button>
                       </div>
                     </div>
-                    <div class="whitespace-pre-line">{{ e.note }}</div>
+                    <div v-if="progressState.editingNoteId===e.id && selectedPdpIsOwner" class="mt-2">
+                      <textarea v-model="progressState.noteDrafts[e.id]" rows="3" class="w-full rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="Update your entry"></textarea>
+                      <div class="mt-1 flex gap-1 justify-end">
+                        <button class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="saveOwnerNote(e.id)">Save</button>
+                        <button class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="cancelEditNote">Cancel</button>
+                      </div>
+                    </div>
+                    <div v-else class="whitespace-pre-line">{{ e.note }}</div>
+                    <div v-if="progressState.editingCommentId===e.id && selectedPdpIsCurator" class="mt-2">
+                      <textarea v-model="progressState.commentDrafts[e.id]" rows="2" class="w-full rounded-md border bg-transparent px-2 py-1 text-xs" placeholder="Leave a comment for the owner"></textarea>
+                      <div class="mt-1 flex gap-1 justify-end">
+                        <button class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="saveCuratorComment(e.id)">Save</button>
+                        <button class="rounded border px-2 py-0.5 text-[10px] hover:bg-muted" @click="cancelEditComment">Cancel</button>
+                      </div>
+                    </div>
+                    <div v-else-if="e.curator_comment" class="mt-2 rounded-md bg-muted/50 px-2 py-1 text-xs">
+                      <div class="text-[10px] text-muted-foreground mb-0.5">Curator comment</div>
+                      <div class="whitespace-pre-line">{{ e.curator_comment }}</div>
+                    </div>
                   </div>
                 </template>
               </div>

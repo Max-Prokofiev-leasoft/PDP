@@ -59,6 +59,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::patch('/pdps/{pdp}/skills/{skill}/criteria/{index}/done.json', [PdpSkillController::class, 'updateCriterionDone'])->whereNumber('index');
     Route::get('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress.json', [PdpSkillController::class, 'listProgress'])->whereNumber('index');
     Route::post('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress.json', [PdpSkillController::class, 'addProgress'])->whereNumber('index');
+    Route::patch('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}.json', [PdpSkillController::class, 'updateProgressNote'])->whereNumber('index')->whereNumber('entry');
+    Route::patch('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}/comment.json', [PdpSkillController::class, 'commentProgress'])->whereNumber('index')->whereNumber('entry');
     Route::post('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}/approve.json', [PdpSkillController::class, 'approveProgress'])->whereNumber('index')->whereNumber('entry');
     Route::delete('/pdps/{pdp}/skills/{skill}/criteria/{index}/progress/{entry}.json', [PdpSkillController::class, 'deleteProgress'])->whereNumber('index')->whereNumber('entry');
 
