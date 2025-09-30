@@ -58,23 +58,31 @@ Junie should ensure linters/formatters pass before submitting when PHP/JS/TS/Vue
 - For project-wide search use search_project with short keywords.
 - Keep changes minimal and well-scoped to satisfy the issue description.
 
+## Imports and namespaces (PHP)
+- Always import classes/interfaces with `use` at the top of the file. Avoid inline fully qualified names (FQCN) like `\App\Repositories\PdpSkillRepository` in property/parameter/return types and code.
+- Example (preferred):
+  - use App\Repositories\PdpSkillRepository;
+  - private PdpSkillRepository $skillRepo;
+- Use FQCN only when absolutely necessary (e.g., string references in config) or to avoid rare name collisions.
+- Keep import lists organized and remove unused imports.
 
-## SOLID & Clean Code (для Junie)
-- Дотримуйся SOLID:
-  - S: Тримай контролери тонкими; валідацію винось у FormRequest; бізнес-логіку — у Services/Actions.
-  - O: Розширюй через нові класи/стратегії, не змінюй існуюче без потреби.
-  - L: Не ломи контракт батьківського типу; зберігай очікувані інваріанти.
-  - I: Використовуй вузькі інтерфейси; не змушуй клієнтів залежати від зайвого.
-  - D: Залеж від інтерфейсів; інжектуй через конструктор/контейнер.
-- Clean Code правила:
-  - Маленькі методи, одна відповідальність, ранні повернення замість глибокої вкладеності.
-  - Зрозумілі імена англійською. Видаляй мертвий код і зайві коментарі.
-  - Використовуй DTO/Value Objects для складних запитів/відповідей; форматування — у Resources/Presenters.
-  - Політики/гейти для доступу; репозиторії/Query-класи для складних запитів.
-- Чекліст перед змінами:
-  - Контролер не містить бізнес-логіки? Валідація через FormRequest?  
-  - Залежності вводяться через інтерфейси/DI?  
-  - Відсутні довгі методи/багатовідповідальні класи?  
-  - Імена зрозумілі; немає мертвого коду/коментарів.  
-  - Вся бізнес логіка виконується в сервісах/акціях.  
-  - Чисті контроллери, використовуйте виключно сервіси/акції для бізнес-логіки.
+
+## SOLID & Clean Code (for Junie)
+- Follow SOLID:
+  - S: Keep controllers thin; move validation to FormRequest; business logic goes to Services/Actions.
+  - O: Extend via new classes/strategies; avoid modifying existing code without necessity.
+  - L: Do not break parent contracts; maintain expected invariants.
+  - I: Use narrow interfaces; do not force clients to depend on unnecessary things.
+  - D: Depend on abstractions; inject via constructor/container.
+- Clean Code rules:
+  - Small methods with single responsibility; prefer early returns over deep nesting.
+  - Clear names in English. Remove dead code and redundant comments.
+  - Use DTOs/Value Objects for complex requests/responses; handle presentation/formatting in Resources/Presenters.
+  - Use Policies/Gates for access control; use Repositories/Query classes for complex queries.
+- Pre-change checklist:
+  - Does the controller contain no business logic? Is validation done via a FormRequest?
+  - Are dependencies injected via interfaces/DI?
+  - Are there no long methods or multi-responsibility classes?
+  - Are names clear; is there no dead code/comments?
+  - Is all business logic executed in services/actions?
+  - Are controllers clean, using only services/actions for business logic?

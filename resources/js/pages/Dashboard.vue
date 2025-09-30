@@ -113,8 +113,6 @@ interface PdpSummary {
   totalCriteria: number
   approvedCount: number
   pendingCount: number
-  avgApproveHours: number | null
-  medianApproveHours: number | null
   wins: { date: string; count: number }[]
   skills: { id: number; skill: string; totalCriteria: number; approvedCount: number; pendingCount: number }[]
 }
@@ -173,14 +171,14 @@ async function loadPdps() {
 }
 
 async function loadSummary() {
-  if (!selectedPdpId.value) { summary.value = { totalCriteria: 0, approvedCount: 0, pendingCount: 0, avgApproveHours: null, medianApproveHours: null, wins: [], skills: [] }; return }
+  if (!selectedPdpId.value) { summary.value = { totalCriteria: 0, approvedCount: 0, pendingCount: 0, wins: [], skills: [] }; return }
   summaryLoading.value = true
   summaryError.value = ''
   try {
     summary.value = await http(`/dashboard/pdps/${selectedPdpId.value}/summary.json`)
   } catch (e: any) {
     summaryError.value = e?.message || 'Failed to load summary'
-    summary.value = { totalCriteria: 0, approvedCount: 0, pendingCount: 0, avgApproveHours: null, medianApproveHours: null, wins: [], skills: [] }
+    summary.value = { totalCriteria: 0, approvedCount: 0, pendingCount: 0, wins: [], skills: [] }
   } finally {
     summaryLoading.value = false
   }

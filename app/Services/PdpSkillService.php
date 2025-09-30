@@ -10,28 +10,37 @@ use Illuminate\Database\Eloquent\Collection;
 
 class PdpSkillService
 {
+    private \App\Repositories\PdpSkillRepository $skillRepo;
+    private \App\Repositories\PdpSkillCriterionProgressRepository $progressRepo;
+
+    public function __construct(
+        \App\Repositories\PdpSkillRepository $skillRepo,
+        \App\Repositories\PdpSkillCriterionProgressRepository $progressRepo
+    ) {
+        $this->skillRepo = $skillRepo;
+        $this->progressRepo = $progressRepo;
+    }
+
     // Public API
 
     public function getSkills(Pdp $pdp): Collection
     {
-        return $pdp->skills()->get();
+        return $this->skillRepo->getByPdp($pdp);
     }
 
     public function createSkill(Pdp $pdp, array $data): PdpSkill
     {
-        $order = $data['order_column'] ?? ($pdp->skills()->max('order_column') + 1);
-        return $pdp->skills()->create($data + ['order_column' => $order]);
+        return $this->skillRepo->createForPdp($pdp, $data);
     }
 
     public function updateSkill(PdpSkill $skill, array $data): PdpSkill
     {
-        $skill->update($data);
-        return $skill;
+        return $this->skillRepo->update($skill, $data);
     }
 
     public function deleteSkill(PdpSkill $skill): void
     {
-        $skill->delete();
+        $this->skillRepo->delete($skill);
     }
 
     public function updateCriterionComment(PdpSkill $skill, int $index, ?string $comment): PdpSkill
@@ -69,12 +78,7 @@ class PdpSkillService
         $items = $this->parseCriteriaItems((string)($skill->criteria ?? ''));
         $this->assertIndex($index, $items);
 
-        $entries = PdpSkillCriterionProgress::query()
-            ->where('pdp_skill_id', $skill->id)
-            ->where('criterion_index', $index)
-            ->with('user:id,name,email')
-            ->orderBy('created_at')
-            ->get();
+        $entries = $this->progressRepo->listBySkillAndIndexWithUser($skill->id, $index);
 
         return [
             'criterion' => $items[$index] ?? null,
@@ -87,13 +91,7 @@ class PdpSkillService
         $items = $this->parseCriteriaItems((string)($skill->criteria ?? ''));
         $this->assertIndex($index, $items);
 
-        return PdpSkillCriterionProgress::create([
-            'pdp_skill_id' => $skill->id,
-            'criterion_index' => $index,
-            'user_id' => $userId,
-            'note' => $note,
-            'approved' => false,
-        ]);
+        return $this->progressRepo->create($skill->id, $index, $userId, $note);
     }
 
     public function deleteProgress(PdpSkill $skill, int $index, PdpSkillCriterionProgress $entry): void
@@ -104,7 +102,7 @@ class PdpSkillService
         if ($entry->pdp_skill_id !== $skill->id || $entry->criterion_index !== $index) {
             abort(403, 'Entry does not belong to the specified criterion');
         }
-        $entry->delete();
+        $this->progressRepo->delete($entry);
     }
 
     public function approveProgress(PdpSkill $skill, int $index, PdpSkillCriterionProgress $entry): PdpSkillCriterionProgress
@@ -115,9 +113,7 @@ class PdpSkillService
         if ($entry->pdp_skill_id !== $skill->id || $entry->criterion_index !== $index) {
             abort(403, 'Entry does not belong to the specified criterion');
         }
-        $entry->approved = true;
-        $entry->save();
-        return $entry->fresh()->load('user:id,name,email');
+        return $this->progressRepo->approve($entry);
     }
 
     public function setProgressCuratorComment(PdpSkill $skill, int $index, PdpSkillCriterionProgress $entry, ?string $comment): PdpSkillCriterionProgress
@@ -129,9 +125,7 @@ class PdpSkillService
             abort(403, 'Entry does not belong to the specified criterion');
         }
 
-        $entry->curator_comment = ($comment !== null && $comment !== '') ? $comment : null;
-        $entry->save();
-        return $entry->fresh()->load('user:id,name,email');
+        return $this->progressRepo->setCuratorComment($entry, $comment);
     }
 
     public function updateProgressNote(PdpSkill $skill, int $index, PdpSkillCriterionProgress $entry, string $note): PdpSkillCriterionProgress
@@ -146,26 +140,18 @@ class PdpSkillService
             abort(422, 'Approved entry cannot be edited');
         }
 
-        $entry->note = $note;
-        $entry->save();
-        return $entry->fresh()->load('user:id,name,email');
+        return $this->progressRepo->updateNote($entry, $note);
     }
 
     public function buildAnnex(Pdp $pdp): array
     {
-        $skills = $pdp->skills()->orderBy('order_column')->orderBy('id')->get();
+        $skills = $this->skillRepo->getSkillsOrderedForAnnex($pdp);
         $out = [];
         foreach ($skills as $s) {
             $items = $this->parseCriteriaItems((string)($s->criteria ?? ''));
             $criteria = [];
             foreach ($items as $i => $item) {
-                $entries = PdpSkillCriterionProgress::query()
-                    ->where('pdp_skill_id', $s->id)
-                    ->where('criterion_index', $i)
-                    ->where('approved', true)
-                    ->with('user:id,name,email')
-                    ->orderBy('created_at')
-                    ->get();
+                $entries = $this->progressRepo->approvedEntriesBySkillAndIndex((int)$s->id, (int)$i);
                 $criteria[] = [
                     'index' => $i,
                     'text' => $item['text'] ?? '',
@@ -192,33 +178,7 @@ class PdpSkillService
 
     public function pendingApprovals(int $curatorUserId): array
     {
-        $query = PdpSkillCriterionProgress::query()
-            ->where('approved', false)
-            ->join('pdp_skills', 'pdp_skills.id', '=', 'pdp_skill_criterion_progress.pdp_skill_id')
-            ->join('pdps', 'pdps.id', '=', 'pdp_skills.pdp_id')
-            ->join('pdp_curators', function ($j) use ($curatorUserId) {
-                $j->on('pdp_curators.pdp_id', '=', 'pdps.id')
-                  ->where('pdp_curators.user_id', '=', $curatorUserId);
-            })
-            ->leftJoin('users', 'users.id', '=', 'pdps.user_id')
-            ->select([
-                'pdp_skill_criterion_progress.id as id',
-                'pdp_skill_criterion_progress.pdp_skill_id as skill_id',
-                'pdp_skill_criterion_progress.criterion_index as criterion_index',
-                'pdp_skill_criterion_progress.user_id as author_id',
-                'pdp_skill_criterion_progress.note as note',
-                'pdp_skill_criterion_progress.created_at as created_at',
-                'pdp_skills.pdp_id as pdp_id',
-                'pdp_skills.skill as skill',
-                'pdp_skills.criteria as criteria',
-                'pdps.title as pdp_title',
-                'users.id as owner_id',
-                'users.name as owner_name',
-                'users.email as owner_email',
-            ])
-            ->orderBy('pdp_skill_criterion_progress.created_at');
-
-        $rows = $query->limit(100)->get();
+        $rows = $this->progressRepo->pendingApprovalsForCurator($curatorUserId);
 
         $out = [];
         foreach ($rows as $row) {
@@ -258,7 +218,7 @@ class PdpSkillService
 
     public function buildSummary(Pdp $pdp): array
     {
-        $skills = $pdp->skills()->get(['id','skill','criteria']);
+        $skills = $this->skillRepo->getSkillsForSummary($pdp);
         $totalCriteria = 0;
         $doneAware = false;
         $doneCount = 0;
@@ -283,12 +243,7 @@ class PdpSkillService
             if ($skillDoneAware) {
                 $skillApproved = $skillDoneCount;
             } else {
-                $skillApproved = (int)PdpSkillCriterionProgress::query()
-                    ->where('pdp_skill_id', $s->id)
-                    ->where('approved', true)
-                    ->distinct()
-                    ->get(['criterion_index'])
-                    ->count();
+                $skillApproved = $this->progressRepo->distinctApprovedCountBySkill((int)$s->id);
             }
 
             if ($skillDoneAware) { $doneCount += $skillDoneCount; }
@@ -302,13 +257,7 @@ class PdpSkillService
             ];
         }
 
-        $approvedDistinct = PdpSkillCriterionProgress::query()
-            ->join('pdp_skills', 'pdp_skills.id', '=', 'pdp_skill_criterion_progress.pdp_skill_id')
-            ->where('pdp_skills.pdp_id', $pdp->id)
-            ->where('pdp_skill_criterion_progress.approved', true)
-            ->distinct()
-            ->get(['pdp_skill_criterion_progress.pdp_skill_id', 'pdp_skill_criterion_progress.criterion_index'])
-            ->count();
+        $approvedDistinct = $this->progressRepo->approvedDistinctCountByPdp((int)$pdp->id);
 
         if ($doneAware) {
             $approvedCount = (int)$doneCount;
@@ -323,58 +272,7 @@ class PdpSkillService
         $start = (clone $today)->modify('-29 days');
         $endExclusive = (clone $today)->modify('+1 day');
 
-        $approvedRows = PdpSkillCriterionProgress::query()
-            ->join('pdp_skills', 'pdp_skills.id', '=', 'pdp_skill_criterion_progress.pdp_skill_id')
-            ->where('pdp_skills.pdp_id', $pdp->id)
-            ->where('pdp_skill_criterion_progress.approved', true)
-            ->whereBetween('pdp_skill_criterion_progress.updated_at', [
-                $start->format('Y-m-d 00:00:00'),
-                $endExclusive->format('Y-m-d 00:00:00'),
-            ])
-            ->get(['pdp_skill_criterion_progress.created_at','pdp_skill_criterion_progress.updated_at']);
-
-        $durations = [];
-        foreach ($approvedRows as $row) {
-            try {
-                $created = new \DateTime((string)$row->created_at, $tz);
-                $updated = new \DateTime((string)$row->updated_at, $tz);
-                $hours = max(0, ($updated->getTimestamp() - $created->getTimestamp()) / 3600);
-                $durations[] = $hours;
-            } catch (\Throwable $e) {
-                // skip invalid rows
-            }
-        }
-
-        $avgApproveHours = null;
-        $medianApproveHours = null;
-        if (!empty($durations)) {
-            $sum = array_sum($durations);
-            $avg = $sum / count($durations);
-
-            sort($durations);
-            $n = count($durations);
-            if ($n % 2 === 1) {
-                $median = $durations[intdiv($n, 2)];
-            } else {
-                $median = ($durations[$n / 2 - 1] + $durations[$n / 2]) / 2;
-            }
-
-            $avgApproveHours = round((float)$avg, 1);
-            $medianApproveHours = round((float)$median, 1);
-        }
-
-        $rows = PdpSkillCriterionProgress::query()
-            ->join('pdp_skills', 'pdp_skills.id', '=', 'pdp_skill_criterion_progress.pdp_skill_id')
-            ->where('pdp_skills.pdp_id', $pdp->id)
-            ->where('pdp_skill_criterion_progress.approved', true)
-            ->whereBetween('pdp_skill_criterion_progress.updated_at', [
-                $start->format('Y-m-d 00:00:00'),
-                $endExclusive->format('Y-m-d 00:00:00'),
-            ])
-            ->selectRaw('date(pdp_skill_criterion_progress.updated_at) as d, count(*) as c')
-            ->groupBy('d')
-            ->orderBy('d')
-            ->get();
+        $rows = $this->progressRepo->approvedByPdpBetweenDates((int)$pdp->id, $start->format('Y-m-d 00:00:00'), $endExclusive->format('Y-m-d 00:00:00'));
 
         $map = [];
         foreach ($rows as $r) {
@@ -394,8 +292,6 @@ class PdpSkillService
             'totalCriteria' => (int)$totalCriteria,
             'approvedCount' => $approvedCount,
             'pendingCount' => $pendingCount,
-            'avgApproveHours' => $avgApproveHours,
-            'medianApproveHours' => $medianApproveHours,
             'wins' => $wins,
             'skills' => $skillsOut,
         ];
