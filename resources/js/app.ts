@@ -9,7 +9,7 @@ import { initializeTheme } from './composables/useAppearance';
 const appName = import.meta.env.VITE_APP_NAME || 'PDP Tracker';
 
 createInertiaApp({
-    title: (title) => (title ? `${title} - ${appName}` : appName),
+    title: (title) => (title ? title : appName),
     resolve: (name) =>
         resolvePageComponent(
             `./pages/${name}.vue`,
