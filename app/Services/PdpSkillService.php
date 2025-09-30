@@ -5,17 +5,19 @@ namespace App\Services;
 use App\Models\Pdp;
 use App\Models\PdpSkill;
 use App\Models\PdpSkillCriterionProgress;
+use App\Repositories\PdpSkillCriterionProgressRepository;
+use App\Repositories\PdpSkillRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 
 class PdpSkillService
 {
-    private \App\Repositories\PdpSkillRepository $skillRepo;
-    private \App\Repositories\PdpSkillCriterionProgressRepository $progressRepo;
+    private PdpSkillRepository $skillRepo;
+    private PdpSkillCriterionProgressRepository $progressRepo;
 
     public function __construct(
-        \App\Repositories\PdpSkillRepository $skillRepo,
-        \App\Repositories\PdpSkillCriterionProgressRepository $progressRepo
+        PdpSkillRepository $skillRepo,
+        PdpSkillCriterionProgressRepository $progressRepo
     ) {
         $this->skillRepo = $skillRepo;
         $this->progressRepo = $progressRepo;
