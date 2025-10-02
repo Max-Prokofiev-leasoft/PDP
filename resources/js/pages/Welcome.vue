@@ -2,6 +2,35 @@
 import { dashboard, login, register } from '@/routes';
 import { Head, Link } from '@inertiajs/vue3';
 import ThemeToggle from '@/components/ThemeToggle.vue';
+import { onMounted } from 'vue';
+
+// Simple scroll-reveal animations using IntersectionObserver
+onMounted(() => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
+    if (!('IntersectionObserver' in window) || els.length === 0) return;
+    const io = new IntersectionObserver(
+        (entries) => {
+            for (const e of entries) {
+                if (e.isIntersecting) {
+                    e.target.classList.add('in-view');
+                    io.unobserve(e.target);
+                }
+            }
+        },
+        { rootMargin: '0px 0px -10% 0px', threshold: 0.15 }
+    );
+    els.forEach((el) => io.observe(el));
+
+    // Parallax for decorative blobs
+    const blobs = Array.from(document.querySelectorAll<HTMLElement>('[data-parallax]'));
+    window.addEventListener('scroll', () => {
+        const y = window.scrollY;
+        blobs.forEach((b, i) => {
+            const depth = (i + 1) * 10;
+            b.style.transform = `translateY(${y / depth}px)`;
+        });
+    });
+});
 </script>
 
 <template>
@@ -10,14 +39,15 @@ import ThemeToggle from '@/components/ThemeToggle.vue';
         <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
     </Head>
     <div
-        class="flex min-h-screen flex-col items-center bg-[#FDFDFC] p-6 text-[#1b1b18] lg:justify-center lg:p-8 dark:bg-[#0a0a0a]"
+        class="flex min-h-screen flex-col items-center bg-background p-6 text-foreground lg:justify-center lg:p-8"
     >
+        <div class="fixed right-4 top-4 z-50 md:right-8 md:top-6">
+            <ThemeToggle />
+        </div>
         <header
             class="mb-6 w-full max-w-[335px] text-sm not-has-[nav]:hidden lg:max-w-4xl"
         >
             <nav class="flex items-center justify-end gap-4">
-                <ThemeToggle />
-
                 <Link
                     v-if="$page.props.auth.user"
                     :href="dashboard()"
@@ -25,36 +55,34 @@ import ThemeToggle from '@/components/ThemeToggle.vue';
                 >
                     Dashboard
                 </Link>
-                <template v-else>
-                    <Link
-                        :href="login()"
-                        class="inline-block rounded-sm border border-transparent px-5 py-1.5 text-sm leading-normal text-[#1b1b18] hover:border-[#19140035] dark:text-[#EDEDEC] dark:hover:border-[#3E3E3A]"
-                    >
-                        Log in
-                    </Link>
-                    <Link
-                        :href="register()"
-                        class="inline-block rounded-sm border border-[#19140035] px-5 py-1.5 text-sm leading-normal text-[#1b1b18] hover:border-[#1915014a] dark:border-[#3E3E3A] dark:text-[#EDEDEC] dark:hover:border-[#62605b]"
-                    >
-                        Register
-                    </Link>
-                </template>
             </nav>
         </header>
         <div
             class="flex w-full items-center justify-center opacity-100 transition-opacity duration-750 lg:grow starting:opacity-0"
         >
             <main
-                class="flex w-full max-w-[335px] flex-col-reverse overflow-hidden rounded-lg lg:max-w-4xl lg:flex-row"
+                class="hidden flex w-full max-w-[335px] flex-col-reverse overflow-hidden rounded-lg lg:max-w-4xl lg:flex-row"
             >
                 <div
                     class="flex-1 rounded-br-lg rounded-bl-lg bg-white p-6 pb-12 text-[13px] leading-[20px] shadow-[inset_0px_0px_0px_1px_rgba(26,26,0,0.16)] lg:rounded-tl-lg lg:rounded-br-none lg:p-20 dark:bg-[#161615] dark:text-[#EDEDEC] dark:shadow-[inset_0px_0px_0px_1px_#fffaed2d]"
                 >
-                    <h1 class="mb-1 font-medium">PDP Tracker</h1>
-                    <p class="mb-2 text-[#706f6c] dark:text-[#A1A09A]">
-                        Трекер індивідуальних планів розвитку. <br />
-                        Відстежуйте цілі, прогрес і результати вашого PDP.
+                    <h1 class="mb-1 font-semibold text-2xl tracking-tight brand-gradient-text">Leasoft PDP Tracker — transparent growth for everyone</h1>
+                    <p class="mb-4 text-[#3b3a37] dark:text-[#A1A09A]">
+                        Set goals, track progress, and collect outcomes for your Individual Development Plan.
                     </p>
+                    <div class="flex flex-wrap gap-3 mb-6">
+                        <Link :href="login()" class="inline-flex h-10 items-center justify-center rounded-md bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-foreground)] shadow-sm transition-colors hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                            Sign in
+                        </Link>
+                        <Link :href="register()" class="inline-flex h-10 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-4 text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]">
+                            Create account
+                        </Link>
+                    </div>
+                    <ul class="grid gap-1 text-sm text-[#706f6c] dark:text-[#A1A09A]">
+                        <li>• One place for goals, skills, and feedback</li>
+                        <li>• Transparency for employees and leads</li>
+                        <li>• Automatic reminders and summaries</li>
+                    </ul>
                 </div>
                 <div
                     class="hero-slot relative -mb-px aspect-335/376 w-full shrink-0 overflow-hidden rounded-t-lg bg-[#fff2f2] lg:mb-0 lg:-ml-px lg:aspect-auto lg:w-[438px] lg:rounded-t-none lg:rounded-r-lg dark:bg-[#1D0002]"
@@ -743,13 +771,250 @@ import ThemeToggle from '@/components/ThemeToggle.vue';
                     />
                 </div>
             </main>
+
+            <!-- New full landing page -->
+            <main id="landing" class="w-full">
+                <!-- HERO -->
+                <section class="relative overflow-hidden py-20 md:py-28">
+                    <!-- Animated gradient background -->
+                    <div class="pointer-events-none absolute inset-0 -z-10">
+                        <div class="animate-gradient-xy absolute -inset-20 rounded-[50%] bg-[radial-gradient(ellipse_at_center,theme(colors.primary/20),transparent_70%)] blur-3xl"></div>
+                        <div data-parallax class="blob blob-1"></div>
+                        <div data-parallax class="blob blob-2"></div>
+                    </div>
+
+                    <div class="mx-auto max-w-screen-xl px-6">
+                        <div class="grid items-center gap-10 md:grid-cols-2">
+                            <div data-reveal class="reveal">
+                                <h1 class="text-balance text-4xl font-semibold leading-tight tracking-tight md:text-5xl brand-gradient-text">
+                                    Leasoft PDP Tracker — transparent, measurable growth for every employee
+                                </h1>
+                                <p class="mt-5 max-w-[60ch] text-lg text-muted-foreground">
+                                    Set outcome-driven goals, track competencies and evidence, and turn 1:1s into predictable progress. Built for teams who want clarity, momentum, and visibility across Individual Development Plans.
+                                </p>
+                                <div class="mt-8 flex flex-wrap gap-3">
+                                    <Link :href="login()" class="btn-primary">
+                                        Sign in
+                                    </Link>
+                                    <Link :href="register()" class="btn-ghost">
+                                        Create account
+                                    </Link>
+                                </div>
+                            </div>
+                            <div class="relative" data-reveal>
+                                <div class="hero-device">
+                                    <img src="/images/lea-soft.png" alt="Product preview" class="h-full w-full object-contain" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- VALUE PROPOSITION -->
+                <section class="mx-auto max-w-screen-xl px-6 py-16 md:py-24">
+                    <div class="grid gap-10 md:grid-cols-3">
+                        <div class="card" data-reveal>
+                            <h3 class="card-title">One place for growth</h3>
+                            <p class="card-text">Goals, skills, evidence, and feedback live in a single, structured PDP — easy to create, easy to follow.</p>
+                        </div>
+                        <div class="card" data-reveal>
+                            <h3 class="card-title">Visible progress</h3>
+                            <p class="card-text">Employees see their momentum. Leads and mentors see bottlenecks early and unblock quickly.</p>
+                        </div>
+                        <div class="card" data-reveal>
+                            <h3 class="card-title">Operationalized 1:1s</h3>
+                            <p class="card-text">Bring PDP context to every sync: what changed, what’s next, what’s at risk — with evidence, not opinions.</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- HOW IT WORKS -->
+                <section class="bg-muted/30 py-16 md:py-24">
+                    <div class="mx-auto max-w-screen-xl px-6">
+                        <div class="grid items-start gap-12 md:grid-cols-2">
+                            <div data-reveal class="reveal">
+                                <h2 class="text-3xl font-semibold tracking-tight md:text-4xl">From plan to proof — in four steps</h2>
+                                <ol class="mt-6 space-y-4 text-muted-foreground">
+                                    <li><span class="step">1</span> Agree on outcomes and milestones.</li>
+                                    <li><span class="step">2</span> Break them into skills and criteria.</li>
+                                    <li><span class="step">3</span> Collect evidence, notes, and feedback along the way.</li>
+                                    <li><span class="step">4</span> Review, approve, and export summaries for cycles.</li>
+                                </ol>
+                                <div class="mt-8 flex gap-3">
+                                    <Link :href="register()" class="btn-primary">Start your PDP</Link>
+                                    <Link :href="login()" class="btn-ghost">I already have an account</Link>
+                                </div>
+                            </div>
+                            <div class="grid gap-4" data-reveal>
+                                <div class="tile">Progress bar with due dates and reminders</div>
+                                <div class="tile">Skill matrix and competency levels</div>
+                                <div class="tile">Evidence timeline with approvals</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- IMPACT / METRICS -->
+                <section class="mx-auto max-w-screen-xl px-6 py-16 md:py-24">
+                    <div class="grid gap-8 md:grid-cols-3">
+                        <div class="stat" data-reveal>
+                            <div class="stat-value">-35%</div>
+                            <div class="stat-label">time to prepare performance reviews</div>
+                        </div>
+                        <div class="stat" data-reveal>
+                            <div class="stat-value">+42%</div>
+                            <div class="stat-label">more PDP updates across teams</div>
+                        </div>
+                        <div class="stat" data-reveal>
+                            <div class="stat-value">100%</div>
+                            <div class="stat-label">clarity on current goals and next actions</div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECURITY -->
+                <section class="bg-muted/30 py-16 md:py-24">
+                    <div class="mx-auto max-w-screen-xl px-6">
+                        <div class="grid items-center gap-10 md:grid-cols-2">
+                            <div data-reveal>
+                                <h2 class="text-3xl font-semibold tracking-tight md:text-4xl">Secure by design. Company-first.</h2>
+                                <p class="mt-4 max-w-prose text-muted-foreground">Only Leasoft users can access PDP Tracker. Role-based permissions and audit logs keep data secure. Hosted within company infrastructure.</p>
+                                <ul class="mt-6 grid gap-2 text-muted-foreground">
+                                    <li>• Role-based access and approvals</li>
+                                    <li>• Email verification and session protection</li>
+                                </ul>
+                            </div>
+                            <div class="relative" data-reveal>
+                                <div class="security-card">
+                                    <div class="figure">
+                                        <svg viewBox="0 0 64 64" aria-hidden="true">
+                                            <circle class="core" cx="32" cy="32" r="14" />
+                                            <circle class="orbit" cx="32" cy="32" r="24" />
+                                            <circle class="satellite" cx="32" cy="8" r="3" />
+                                        </svg>
+                                        <div class="figure-caption">Plan → Progress → Proof</div>
+                                    </div>
+                                    <div class="success hidden" aria-hidden="true" title="Success achieved">
+                                        <svg viewBox="0 0 96 96" class="success-svg" aria-hidden="true">
+                                            <defs>
+                                                <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+                                                    <stop offset="0%" stop-color="hsl(152 62% 41%)" />
+                                                    <stop offset="100%" stop-color="hsl(43 74% 56%)" />
+                                                </linearGradient>
+                                            </defs>
+                                            <circle cx="48" cy="48" r="30" fill="url(#grad)" opacity="0.15" />
+                                            <circle cx="48" cy="48" r="32" fill="none" stroke="var(--ring)" stroke-width="2" stroke-dasharray="6 8">
+                                                <animateTransform attributeName="transform" type="rotate" from="0 48 48" to="360 48 48" dur="12s" repeatCount="indefinite" />
+                                            </circle>
+                                            <path d="M34 49 l8 8 20-20" fill="none" stroke="var(--ring)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+                                            <circle cx="22" cy="22" r="3" fill="hsl(43 74% 56%)">
+                                                <animate attributeName="opacity" values="1;0;1" dur="2s" repeatCount="indefinite" />
+                                            </circle>
+                                            <circle cx="74" cy="20" r="2.5" fill="hsl(152 62% 41%)">
+                                                <animate attributeName="opacity" values="1;0;1" dur="2.4s" repeatCount="indefinite" />
+                                            </circle>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- FAQ -->
+                <section class="mx-auto max-w-screen-lg px-6 py-16 md:py-24">
+                    <h2 class="text-center text-3xl font-semibold tracking-tight md:text-4xl" data-reveal>FAQ</h2>
+                    <div class="mt-10 grid gap-6" data-reveal>
+                        <details class="faq"><summary>Is PDP Tracker only for engineers?</summary><p>No. It works for any role where growth is measurable through goals, skills, and evidence.</p></details>
+                        <details class="faq"><summary>Can mentors approve evidence?</summary><p>Yes. Curators/leads can review and approve progress entries with comments.</p></details>
+                    </div>
+                </section>
+
+                <!-- FINAL CTA -->
+                <section class="relative overflow-hidden py-16 md:py-24">
+                    <div class="mx-auto max-w-screen-xl px-6 text-center">
+                        <h2 class="text-balance text-3xl font-semibold tracking-tight md:text-4xl" data-reveal>
+                            Make growth visible. Make progress inevitable.
+                        </h2>
+                        <div class="mt-8 flex justify-center gap-3" data-reveal>
+                            <Link :href="login()" class="btn-primary">Sign in</Link>
+                            <Link :href="register()" class="btn-ghost">Create account</Link>
+                        </div>
+                    </div>
+                </section>
+            </main>
         </div>
         <div class="hidden h-14.5 lg:block"></div>
     </div>
 </template>
 
 <style scoped>
-.hero-slot svg {
-    display: none;
+@reference '../../css/app.css';
+.hero-slot svg { display: none; }
+
+/* Buttons */
+.btn-primary { @apply inline-flex h-11 items-center justify-center rounded-md bg-[var(--primary)] px-5 text-sm font-medium text-[var(--primary-foreground)] shadow-sm transition-all hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--ring)]; }
+.btn-ghost { @apply inline-flex h-11 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-5 text-sm font-medium text-[var(--foreground)] transition-all hover:bg-[var(--secondary)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]; }
+
+/* Brand gradient text */
+.brand-gradient-text {
+  background-image: linear-gradient(90deg, hsl(152 62% 41%), hsl(43 74% 56%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
+
+/* Cards & tiles */
+.card { @apply rounded-2xl border border-[var(--border)] bg-card/70 p-6 shadow-sm backdrop-blur transition-transform duration-300 hover:-translate-y-0.5 hover:shadow-md; }
+.card-title { @apply text-lg font-semibold; }
+.card-text { @apply mt-2 text-sm text-muted-foreground; }
+.tile { @apply rounded-xl border border-[var(--border)] bg-card/60 p-4 text-sm text-muted-foreground shadow-sm; }
+
+/* Stats */
+.stat { @apply rounded-2xl border border-[var(--border)] bg-card/70 p-8 text-center shadow-sm; }
+.stat-value { @apply text-4xl font-semibold text-[var(--primary)]; }
+.stat-label { @apply mt-2 text-sm text-muted-foreground; }
+
+/* Hero mock device */
+.hero-device { @apply relative h-72 w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-card shadow-lg md:h-96; }
+
+/* Security */
+.security-card { @apply flex w-full items-center justify-center text-center gap-4 rounded-2xl border border-[var(--border)] bg-card p-6 shadow-sm; }
+
+/* FAQ */
+.faq { @apply rounded-xl border border-[var(--border)] bg-card p-4 text-left shadow-sm; }
+.faq > summary { @apply cursor-pointer list-none text-[0.95rem] font-medium; }
+.faq > p { @apply mt-2 text-sm text-muted-foreground; }
+
+/* Steps */
+.step { @apply mr-2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--primary)]/15 text-xs font-semibold text-[var(--primary)]; }
+
+/* Scroll-reveal */
+.reveal { opacity: 0; transform: translateY(12px); transition: opacity .6s ease, transform .6s ease; }
+.in-view { opacity: 1; transform: translateY(0); }
+
+/* Animated gradient */
+@keyframes gradient-xy { 0%,100%{ transform: translate(0,0) scale(1);} 50%{ transform: translate(10%, -8%) scale(1.1);} }
+.animate-gradient-xy { animation: gradient-xy 10s ease-in-out infinite; }
+
+/* Decorative blobs */
+.blob { position: absolute; border-radius: 50%; filter: blur(30px); opacity: .6; }
+.blob-1 { width: 420px; height: 420px; left: -80px; top: -60px; background: radial-gradient(ellipse at center, hsl(152 62% 41% / .25), transparent 60%); }
+ .blob-2 { width: 380px; height: 380px; right: -80px; bottom: -60px; background: radial-gradient(ellipse at center, hsl(43 74% 56% / .25), transparent 60%); }
+
+/* Figure (replaces old tagline) */
+.satellite { fill: hsl(43 74% 56%); filter: drop-shadow(0 1px 1px hsl(43 74% 56% / .25)); transform-origin: 32px 32px; animation: spin-slow 8s linear infinite; }
+.figure { display: inline-flex; align-items: center; justify-content: center; gap: 14px; }
+.figure svg { width: 80px; height: 80px; }
+.figure-caption { font-size: clamp(1.125rem, 2.2vw, 1.75rem); font-weight: 600; letter-spacing: -0.01em; color: var(--color-foreground); }
+.core { fill: hsl(152 62% 41% / .15); stroke: var(--ring); stroke-width: 1; }
+.orbit { fill: none; stroke: var(--ring); stroke-width: 2; stroke-dasharray: 6 8; animation: spin-slower 18s linear infinite; transform-origin: 32px 32px; }
+@keyframes spin-slower { to { transform: rotate(360deg); } }
+@keyframes spin-slow { to { transform: rotate(-360deg); } }
+
 </style>
+
+
+/* Success icon (replaces growth journey list) */
+.success { display:flex; justify-content:flex-end; align-items:center; flex:0.8; }
+.success-svg { width: 96px; height: 96px; filter: drop-shadow(0 10px 20px hsl(152 62% 41% / .15)); }

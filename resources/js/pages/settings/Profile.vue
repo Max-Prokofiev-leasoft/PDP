@@ -6,6 +6,7 @@ import { Form, Head, Link, usePage } from '@inertiajs/vue3';
 
 import DeleteUser from '@/components/DeleteUser.vue';
 import HeadingSmall from '@/components/HeadingSmall.vue';
+import ProfessionalLevelBadge from '@/components/ProfessionalLevelBadge.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,10 +39,13 @@ const user = page.props.auth.user;
 
         <SettingsLayout>
             <div class="flex flex-col space-y-6">
-                <HeadingSmall
-                    title="Profile information"
-                    description="Update your name and email address"
-                />
+                <div class="flex items-start justify-between">
+                    <HeadingSmall
+                        title="Profile information"
+                        description="Update your name and email address"
+                    />
+                    <div class="hidden sm:block"><ProfessionalLevelBadge /></div>
+                </div>
 
                 <Form
                     v-bind="ProfileController.update.form()"
