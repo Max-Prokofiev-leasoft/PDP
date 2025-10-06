@@ -2,7 +2,7 @@ FROM php:8.2-fpm AS dev
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git unzip curl ca-certificates libzip-dev libpng-dev libonig-dev libxml2-dev \
-    libpq-dev libsqlite3-dev pkg-config gnupg && rm -rf /var/lib/apt/lists/*
+    libpq-dev libsqlite3-dev pkg-config gnupg bash && rm -rf /var/lib/apt/lists/*
 
 RUN docker-php-ext-configure zip && docker-php-ext-install -j$(nproc) \
     pdo pdo_mysql pdo_pgsql pdo_sqlite zip bcmath exif pcntl gd
@@ -20,4 +20,4 @@ RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 
-CMD [ "composer run dev" ]
+CMD ["composer", "run", "dev"]

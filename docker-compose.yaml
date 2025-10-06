@@ -7,10 +7,7 @@ services:
     volumes:
       - ./:/var/www/html
     ports:
-      - "8000:8000"
       - "5173:5173"
-    environment:
-      VITE_PORT: 5173
 
   php:
     build:
@@ -19,6 +16,7 @@ services:
       target: dev
     volumes:
       - ./:/var/www/html
+    entrypoint: []
     command: ["php-fpm", "-F"]
 
   nginx:
@@ -29,4 +27,4 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - app
+      - php
