@@ -1,0 +1,34 @@
+name: Deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  Deploy:
+    name: Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            set -e
+            cd /data/PDP
+            ### Authorize SSH key ###
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/id_rsa
+            ### Pull changes ###
+            git checkout -f main 
+            git pull origin main
+            ### Rebuild the App ###
+            docker compose up -d --build

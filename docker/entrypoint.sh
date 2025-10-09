@@ -5,12 +5,10 @@ cd /var/www/html
 
 [ -f .env ] || cp .env.example .env
 
-mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache database
-[ -f database/database.sqlite ] || touch database/database.sqlite
-[ -f storage/logs/laravel.log ] || touch storage/logs/laravel.log
+mkdir -p storage/framework/{cache,sessions,views} storage/logs bootstrap/cache
+touch storage/logs/laravel.log
 
-chown -R www-data:www-data storage bootstrap/cache database
-chmod -R ug+rwX storage bootstrap/cache database
+chmod -R u+rwX,g+rwX storage bootstrap/cache || true
 
 if [ ! -d vendor ]; then
   composer install --no-interaction --prefer-dist
