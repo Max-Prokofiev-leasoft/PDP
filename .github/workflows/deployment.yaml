@@ -24,11 +24,13 @@ jobs:
           script: |
             set -e
             cd /data/PDP
-            ### Authorize SSH key ###
-            eval "$(ssh-agent -s)"
-            ssh-add ~/.ssh/id_rsa
-            ### Pull changes ###
-            git checkout -f main 
+
+            git checkout -f main
             git pull origin main
-            ### Rebuild the App ###
-            docker compose up -d --build
+
+            echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u elai-movchko-leasoft --password-stdin
+
+            docker compose -f docker-compose.prod.yaml pull
+            docker compose -f docker-compose.prod.yaml up -d
+
+            docker image prune -f

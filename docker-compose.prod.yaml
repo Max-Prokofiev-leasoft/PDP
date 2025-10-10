@@ -1,9 +1,6 @@
 services:
   php:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: prod
+    image: ghcr.io/elai-movchko-leasoft/pdp-php:latest
     restart: unless-stopped
     user: "1000:1000"
     environment:
@@ -16,17 +13,12 @@ services:
       - storage:/var/www/html/storage
 
   nginx:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: nginx
+    image: ghcr.io/elai-movchko-leasoft/pdp-nginx:latest
     restart: unless-stopped
     ports:
       - "80:80"
     depends_on:
       - php
-    volumes:
-      - storage:/var/www/html/storage:ro
 
   mysql:
     image: mysql:8.0
