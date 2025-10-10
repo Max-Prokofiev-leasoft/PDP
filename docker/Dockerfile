@@ -76,3 +76,8 @@ RUN mkdir -p storage/framework/{cache,sessions,views} storage/logs bootstrap/cac
 RUN composer dump-autoload --optimize \
     && php artisan package:discover --ansi || true
 
+# ===== NGINX =====
+FROM nginx:alpine AS nginx
+
+COPY --from=prod /var/www/html/public /var/www/html/public
+COPY docker/nginx/default.conf /etc/nginx/conf.d/default.conf
