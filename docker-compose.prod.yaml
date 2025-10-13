@@ -1,4 +1,23 @@
 services:
+  traefik:
+    image: traefik:v3
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - web
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+
   php:
     image: ghcr.io/elai-movchko-leasoft/pdp-php:latest
     restart: unless-stopped
@@ -15,10 +34,16 @@ services:
   nginx:
     image: ghcr.io/elai-movchko-leasoft/pdp-nginx:latest
     restart: unless-stopped
-    ports:
-      - "80:80"
+    networks:
+      - web
     depends_on:
       - php
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pdp.rule=Host(`${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.pdp.entrypoints=websecure"
+      - "traefik.http.routers.pdp.tls=true"
+      - "traefik.http.routers.pdp.tls.certresolver=letsencrypt"
 
   mysql:
     image: mysql:8.0
@@ -47,3 +72,6 @@ services:
 volumes:
   storage:
   mysql_data:
+
+networks:
+  web:
