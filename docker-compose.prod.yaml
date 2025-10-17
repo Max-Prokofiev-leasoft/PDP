@@ -10,12 +10,32 @@ services:
       - web
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik:/etc/traefik
+      - letsencrypt:/letsencrypt
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      # Docker provider
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      # EntryPoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Redirect HTTP → HTTPS
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      # Let's Encrypt resolver (using HTTP challenge)
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@leasoft.org"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
     labels:
+      # Enable Traefik for itself
       - "traefik.enable=true"
+      # Dashboard router
       - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DOMAIN}`)"
-      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
       - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      # Point to the internal Traefik API service
       - "traefik.http.routers.traefik.service=api@internal"
 
   php:
@@ -25,25 +45,29 @@ services:
     environment:
       APP_ENV: production
       APP_DEBUG: "false"
+    networks:
+      - app
     depends_on:
       - mysql
     command: ["php-fpm", "-F"]
     volumes:
       - storage:/var/www/html/storage
+      - ./.env:/var/www/html/.env:ro
 
   nginx:
     image: ghcr.io/elai-movchko-leasoft/pdp-nginx:latest
     restart: unless-stopped
     networks:
       - web
+      - app
     depends_on:
       - php
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.pdp.rule=Host(`${MAIN_DOMAIN}`)"
       - "traefik.http.routers.pdp.entrypoints=websecure"
-      - "traefik.http.routers.pdp.tls=true"
       - "traefik.http.routers.pdp.tls.certresolver=letsencrypt"
+      - "traefik.docker.network=pdp_web"
 
   mysql:
     image: mysql:8.0
@@ -57,6 +81,8 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - app
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
@@ -68,10 +94,14 @@ services:
       PMA_ARBITRARY: 1
     depends_on:
       - mysql
+    networks:
+      - app
 
 volumes:
+  letsencrypt:
   storage:
   mysql_data:
 
 networks:
   web:
+  app:
