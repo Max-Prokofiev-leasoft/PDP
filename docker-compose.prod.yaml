@@ -39,7 +39,7 @@ services:
       - "traefik.http.routers.traefik.service=api@internal"
 
   php:
-    image: ghcr.io/elai-movchko-leasoft/pdp-php:latest
+    image: ghcr.io/leasoft/pdp-php:latest
     restart: unless-stopped
     user: "1000:1000"
     environment:
@@ -55,7 +55,7 @@ services:
       - ./.env:/var/www/html/.env:ro
 
   nginx:
-    image: ghcr.io/elai-movchko-leasoft/pdp-nginx:latest
+    image: ghcr.io/leasoft/pdp-nginx:latest
     restart: unless-stopped
     networks:
       - web
