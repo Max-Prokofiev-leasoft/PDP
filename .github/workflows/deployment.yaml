@@ -30,7 +30,7 @@ jobs:
       - name: Build & Push PHP
         uses: docker/build-push-action@v6
         with:
-          context: ./docker
+          context: .
           file: ./docker/Dockerfile
           target: prod
           push: true
@@ -44,7 +44,7 @@ jobs:
       - name: Build & Push Nginx
         uses: docker/build-push-action@v6
         with:
-          context: ./docker
+          context: .
           file: ./docker/Dockerfile
           target: nginx
           push: true
