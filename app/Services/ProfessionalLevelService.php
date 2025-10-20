@@ -46,7 +46,8 @@ class ProfessionalLevelService
             ];
         }
 
-        $closed = $this->countClosedSkills($user);
+        $offset = (int) ($user->pro_level_offset ?? 0);
+        $closed = $this->countClosedSkills($user) + $offset;
 
         // Find highest level whose threshold <= closed
         $currentIdx = 0;
@@ -71,6 +72,21 @@ class ProfessionalLevelService
             $progress = max(0, min($span, $closed - $from));
             $percent = (int) floor(($progress / $span) * 100);
             $remaining = max(0, $to - $closed);
+        } else {
+            // At the top-most level (no next level):
+            //  - If user is exactly at the baseline (selected this level), show 0%.
+            //  - Otherwise, show gradual progress beyond baseline based on the previous span,
+            //    capped at 99% so it never looks "complete" without a higher level defined.
+            if ($closed <= $from) {
+                $percent = 0;
+            } else {
+                // Use a broader span at the top-most level so a few skills beyond baseline doesn't look disproportionally high.
+                // Measure progress beyond the baseline against the whole journey up to this level.
+                $progressBeyond = max(0, $closed - $from);
+                $span = max(1, $from); // e.g., Senior uses 35 as span
+                $percent = (int) floor(min($progressBeyond, $span) / $span * 100);
+                $percent = min(99, $percent);
+            }
         }
 
         return [

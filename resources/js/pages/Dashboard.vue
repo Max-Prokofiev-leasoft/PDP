@@ -4,6 +4,7 @@ import AppLayout from '@/layouts/AppLayout.vue';
 import { dashboard } from '@/routes';
 import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/vue3';
+import LevelSelectModal from '@/components/LevelSelectModal.vue';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -186,7 +187,23 @@ async function loadSummary() {
 
 watch(selectedPdpId, () => { loadSummary() })
 
-onMounted(() => { loadOverview(); loadPending(); loadProLevel(); loadPdps().then(() => { loadSummary() }) })
+const showLevelModal = ref(false)
+
+onMounted(() => {
+  loadOverview();
+  loadPending();
+  loadProLevel();
+  loadPdps().then(() => { loadSummary() })
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('choose-level') === '1') {
+      showLevelModal.value = true
+      const url = new URL(window.location.href)
+      url.searchParams.delete('choose-level')
+      window.history.replaceState({}, '', url.toString())
+    }
+  } catch {}
+})
 </script>
 
 <template>
@@ -343,6 +360,7 @@ onMounted(() => { loadOverview(); loadPending(); loadProLevel(); loadPdps().then
                 <div v-else class="text-xs text-muted-foreground">No data.</div>
               </div>
             </div>
+            <LevelSelectModal v-model:isOpen="showLevelModal" @saved="loadProLevel" />
         </div>
     </AppLayout>
 </template>

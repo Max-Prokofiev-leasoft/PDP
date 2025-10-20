@@ -79,6 +79,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     // User professional level (global, based on closed skills across all PDPs)
     Route::get('/profile/pro-level.json', [UserProfessionalLevelController::class, 'show']);
+    Route::post('/profile/pro-level/start.json', [UserProfessionalLevelController::class, 'start']);
 
     Route::delete('/pdps/{pdp}/skills/{skill}.json', [PdpSkillController::class, 'destroy']);
 });
