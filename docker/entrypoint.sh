@@ -15,7 +15,8 @@ if [ ! -d vendor ]; then
 fi
 
 if [ ! -d node_modules ]; then
-  if [ -f package-lock.json ]; then npm ci; else npm install; fi
+  npm install --include=optional --verbose \
+  && npm rebuild lightningcss --build-from-source --verbose
 fi
 
 php artisan key:generate --force || true
