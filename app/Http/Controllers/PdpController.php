@@ -443,11 +443,14 @@ class PdpController extends Controller
             'priority' => (string)($p['priority'] ?? 'Medium'),
             'eta' => $p['eta'] ?? null,
             'status' => (string)($p['status'] ?? 'Planned'),
+            'template_id' => $record->id,
         ]);
 
         $skills = $tpl['skills'] ?? [];
         $order = 0;
         foreach ($skills as $s) {
+            // Ensure we have a stable template-skill key
+            $templateKey = (string)($s['key'] ?? ('idx-' . $order));
             PdpSkill::create([
                 'pdp_id' => $new->id,
                 'skill' => (string)$s['skill'],
@@ -457,11 +460,81 @@ class PdpController extends Controller
                 'eta' => $s['eta'] ?? null,
                 'status' => (string)($s['status'] ?? 'Planned'),
                 'order_column' => $s['order_column'] ?? $order,
+                'template_skill_key' => $templateKey,
+                'is_manual_override' => false,
             ]);
             $order++;
         }
 
         return response()->json($new->fresh()->loadCount('skills'), Response::HTTP_CREATED);
+    }
+
+    /**
+     * Assign a published template's skills into an existing PDP (compose PDP from skill templates).
+     * - Allowed for PDP owner or curators.
+     * - PDP must not be finalized (status = Done).
+     * - Adds only skills that are missing by template stable key; skips duplicates.
+     * - Does not change PDP's template_id (so PDP can be composed from multiple templates).
+     */
+    public function assignTemplateToPdp(Request $request, Pdp $pdp, string $key)
+    {
+        $this->authorizeAccess($request, $pdp);
+
+        if ($pdp->isFinalized()) {
+            return response()->json(['message' => 'PDP is finalized and cannot be modified'], Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+        $id = (int) Str::after($key, 'db-');
+        $record = PdpTemplate::query()->where('id', $id)->where('published', true)->first();
+        abort_unless($record, Response::HTTP_NOT_FOUND);
+
+        // Optional subset of skill keys to assign
+        $payload = $request->validate([
+            'keys' => ['nullable','array'],
+            'keys.*' => ['string']
+        ]);
+        $onlyKeys = isset($payload['keys']) && is_array($payload['keys']) ? array_flip($payload['keys']) : null;
+
+        $tpl = (array) $record->data;
+        $skills = (array) ($tpl['skills'] ?? []);
+
+        // Index existing PDP skills by template_skill_key to avoid duplicates
+        $existingKeys = $pdp->skills()->whereNotNull('template_skill_key')->pluck('template_skill_key')->all();
+        $existingKeys = array_flip($existingKeys); // faster lookup
+
+        $added = [];
+        $maxOrder = (int) ($pdp->skills()->max('order_column') ?? -1);
+
+        foreach ($skills as $idx => $s) {
+            $templateKey = (string)($s['key'] ?? ('idx-' . $idx));
+            if ($onlyKeys !== null && !isset($onlyKeys[$templateKey])) {
+                continue; // skip not selected
+            }
+            if (isset($existingKeys[$templateKey])) {
+                continue; // skip duplicates
+            }
+            $maxOrder++;
+            $created = PdpSkill::create([
+                'pdp_id' => $pdp->id,
+                'skill' => (string)$s['skill'],
+                'description' => $s['description'] ?? null,
+                'criteria' => $s['criteria'] ?? null,
+                'priority' => (string)($s['priority'] ?? 'Medium'),
+                'eta' => $s['eta'] ?? null,
+                'status' => (string)($s['status'] ?? 'Planned'),
+                'order_column' => $s['order_column'] ?? $maxOrder,
+                'template_skill_key' => $templateKey,
+                'is_manual_override' => false,
+            ]);
+            $added[] = $created->id;
+        }
+
+        return response()->json([
+            'pdp_id' => $pdp->id,
+            'added_count' => count($added),
+            'added_ids' => $added,
+        ], Response::HTTP_CREATED);
     }
 
     // Create/store a new template in DB.
@@ -493,7 +566,7 @@ class PdpController extends Controller
         $p['status'] = $p['status'] ?? 'Planned';
         $skills = [];
         $order = 0;
-        foreach (($data['skills'] ?? []) as $s) {
+        foreach (($data['skills'] ?? []) as $idx => $s) {
             $skills[] = [
                 'skill' => $s['skill'],
                 'description' => $s['description'] ?? null,
@@ -502,6 +575,8 @@ class PdpController extends Controller
                 'eta' => null,
                 'status' => 'Planned',
                 'order_column' => $s['order_column'] ?? $order,
+                // Stable key for future sync; UUID preferred, fallback to positional key
+                'key' => (string)($s['key'] ?? (Str::uuid()->toString())),
             ];
             $order++;
         }
@@ -525,6 +600,158 @@ class PdpController extends Controller
             'title' => (string)($p['title'] ?? 'Template'),
             'skills_count' => count($skills),
         ], Response::HTTP_CREATED);
+    }
+
+    // Trigger synchronization of a DB-backed template across all non-finalized PDPs.
+    public function syncTemplate(Request $request, string $key)
+    {
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+        $id = (int) Str::after($key, 'db-');
+        $tpl = PdpTemplate::query()->where('id', $id)->first();
+        abort_unless($tpl, Response::HTTP_NOT_FOUND);
+
+        // Only template owner can trigger sync for now
+        abort_unless($tpl->user_id === $request->user()->id, Response::HTTP_FORBIDDEN);
+
+        app(\App\Services\PdpTemplateSyncService::class)->sync($tpl);
+        return response()->json(['status' => 'ok']);
+    }
+
+    // Get full template payload for editing (owner only)
+    public function getTemplate(Request $request, string $key)
+    {
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+        $id = (int) Str::after($key, 'db-');
+        $tpl = PdpTemplate::query()->where('id', $id)->first();
+        abort_unless($tpl, Response::HTTP_NOT_FOUND);
+
+        // Only owner can read full editable template payload
+        abort_unless($tpl->user_id === $request->user()->id, Response::HTTP_FORBIDDEN);
+
+        return response()->json([
+            'key' => 'db-' . $tpl->id,
+            'id' => (int) $tpl->id,
+            'published' => (bool) $tpl->published,
+            'title' => (string) $tpl->title,
+            'description' => $tpl->description,
+            'data' => $tpl->data,
+        ]);
+    }
+
+    // Update existing DB-backed template (owner only)
+    public function updateTemplate(Request $request, string $key)
+    {
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+        $id = (int) Str::after($key, 'db-');
+        $tpl = PdpTemplate::query()->where('id', $id)->first();
+        abort_unless($tpl, Response::HTTP_NOT_FOUND);
+
+        // Only owner can update
+        abort_unless($tpl->user_id === $request->user()->id, Response::HTTP_FORBIDDEN);
+
+        $data = $request->validate([
+            'version' => ['nullable','integer'],
+            'pdp' => ['required','array'],
+            'pdp.title' => ['required','string','max:255'],
+            'pdp.description' => ['nullable','string'],
+            'pdp.priority' => ['nullable','in:Low,Medium,High'],
+            'pdp.eta' => ['nullable','string','max:255'],
+            'pdp.status' => ['nullable','in:Planned,In Progress,Done,Blocked'],
+            'skills' => ['nullable','array'],
+            'skills.*.skill' => ['required','string','max:255'],
+            'skills.*.description' => ['nullable','string'],
+            'skills.*.criteria' => ['nullable','string'],
+            'skills.*.priority' => ['nullable','in:Low,Medium,High'],
+            'skills.*.eta' => ['nullable','string','max:255'],
+            'skills.*.status' => ['nullable','in:Planned,In Progress,Done,Blocked'],
+            'skills.*.order_column' => ['nullable','integer','min:0'],
+            'skills.*.key' => ['nullable','string'],
+        ]);
+
+        // Normalize defaults similar to createTemplate
+        $p = $data['pdp'];
+        $p['priority'] = $p['priority'] ?? 'Medium';
+        $p['eta'] = $p['eta'] ?? null;
+        $p['status'] = $p['status'] ?? 'Planned';
+
+        $skills = [];
+        $order = 0;
+        foreach (($data['skills'] ?? []) as $idx => $s) {
+            $skills[] = [
+                'skill' => $s['skill'],
+                'description' => $s['description'] ?? null,
+                'criteria' => $s['criteria'] ?? null,
+                'priority' => $s['priority'] ?? 'Medium',
+                'eta' => null,
+                'status' => 'Planned',
+                'order_column' => $s['order_column'] ?? $order,
+                'key' => (string)($s['key'] ?? (Str::uuid()->toString())),
+            ];
+            $order++;
+        }
+
+        $payload = [
+            'version' => (int)($data['version'] ?? ($tpl->data['version'] ?? 1)),
+            'pdp' => $p,
+            'skills' => $skills,
+        ];
+
+        $tpl->update([
+            'title' => (string)($p['title'] ?? $tpl->title),
+            'description' => $p['description'] ?? null,
+            'data' => $payload,
+        ]);
+
+        // Auto-sync all linked, non-finalized PDPs right after template update
+        // This will:
+        // - update existing skills' fields (including criteria) unless they were manually overridden
+        // - add newly added skills
+        // - remove skills deleted from the template if they were not manually overridden
+        app(\App\Services\PdpTemplateSyncService::class)->sync($tpl);
+
+        return response()->json([
+            'key' => 'db-' . $tpl->id,
+            'id' => (int)$tpl->id,
+            'title' => (string)$tpl->title,
+            'skills_count' => count($skills),
+            'synced' => true,
+        ]);
+    }
+
+    // Delete template (owner only) and prune related PDP links/skills
+    public function deleteTemplate(Request $request, string $key)
+    {
+        abort_unless(Str::startsWith($key, 'db-'), Response::HTTP_NOT_FOUND);
+        $id = (int) Str::after($key, 'db-');
+        $tpl = PdpTemplate::query()->where('id', $id)->first();
+        abort_unless($tpl, Response::HTTP_NOT_FOUND);
+
+        // Only owner can delete template
+        abort_unless($tpl->user_id === $request->user()->id, Response::HTTP_FORBIDDEN);
+
+        // Collect all template skill keys
+        $data = (array) $tpl->data;
+        $skills = (array) ($data['skills'] ?? []);
+        $keys = [];
+        foreach ($skills as $idx => $s) {
+            $keys[] = (string)($s['key'] ?? ('idx-' . $idx));
+        }
+
+        // Remove PDP skills that originated from this template (but keep manual overrides)
+        if (!empty($keys)) {
+            PdpSkill::query()
+                ->whereIn('template_skill_key', $keys)
+                ->where('is_manual_override', false)
+                ->delete();
+        }
+
+        // Detach pdps from this template
+        Pdp::query()->where('template_id', $tpl->id)->update(['template_id' => null]);
+
+        // Finally, delete the template
+        $tpl->delete();
+
+        return response()->noContent();
     }
 
     // Built-in templates catalog definition (minimal, can be extended or moved to DB later)

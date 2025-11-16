@@ -19,6 +19,14 @@ class PdpSkill extends Model
         'eta',
         'status',
         'order_column',
+        'template_skill_key',
+        'is_manual_override',
+    ];
+
+    protected $casts = [
+        'is_manual_override' => 'boolean',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     public function pdp(): BelongsTo

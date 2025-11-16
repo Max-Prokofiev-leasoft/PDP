@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { type BreadcrumbItem } from '@/types'
 import { Head } from '@inertiajs/vue3'
 import Heading from '@/components/Heading.vue'
+import PdpsLists from '@/components/pdps/PdpsLists.vue'
+import ManageTab from '@/components/pdps/ManageTab.vue'
+import AnnexTab from '@/components/pdps/AnnexTab.vue'
 import PdpFormModal from '@/components/pdps/modals/PdpFormModal.vue'
 import SkillFormModal from '@/components/pdps/modals/SkillFormModal.vue'
 import { getJsPdfCtor } from '@/composables/usePdfExport'
@@ -11,7 +14,6 @@ import { ensurePdfUnicodeFont } from '@/utils/pdfFont'
 import { getLeaSoftLogoCircular } from '@/utils/images'
 import { formatKyivDateTime } from '@/utils/date'
 import { parseCriteriaItems } from '@/utils/criteria'
-import { statusBadgeClass } from '@/utils/status'
 import { notifySuccess, notifyError } from '@/composables/useNotify'
 import { confirmDialog } from '@/composables/useConfirm'
 
@@ -586,8 +588,7 @@ async function deleteSkill(id: number) {
   await loadSkills(selectedPdpId.value)
 }
 
-const hasPdps = computed(() => pdps.value.length > 0)
-const hasSharedPdps = computed(() => sharedPdps.value.length > 0)
+// derived flags are handled in child components
 const selectedPdp = computed(() => {
   const id = selectedPdpId.value
   if (!id) return null
@@ -622,18 +623,7 @@ const userOptions = ref<Curator[]>([])
 const showUserDropdown = ref(false)
 let userSearchTimer: number | null = null
 
-// Close dropdown on click outside of the picker area
-const userPickerRef = ref<HTMLElement | null>(null)
-function onDocClick(e: MouseEvent) {
-  const el = userPickerRef.value
-  if (!el) return
-  const target = e.target as Node | null
-  if (target && !el.contains(target)) {
-    showUserDropdown.value = false
-  }
-}
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
+// Click outside for curator picker is handled inside ManageTab component
 
 
 watch(curatorEmail, (v) => {
@@ -661,7 +651,7 @@ function selectUserOption(u: Curator) {
   showUserDropdown.value = false
 }
 
-function closeUserDropdown() { showUserDropdown.value = false }
+// dropdown visibility is controlled inside ManageTab
 
 async function assignCurator() {
   const email = curatorEmail.value.trim()
@@ -766,67 +756,22 @@ onMounted(async () => {
       <Heading :title="activeTab==='Annex' ? 'Annex' : 'PDP List'" :description="activeTab==='Annex' ? 'Annex — a document with approved progress entries.' : 'PDP is a plan that contains a list of skills/tasks to achieve.'" />
 
       <div class="flex flex-col gap-4">
-        <!-- PDP list (top) -->
-        <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
-          <div class="mb-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <h2 class="text-base font-semibold flex items-center gap-2">Your PDPs <span class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] leading-none min-w-[18px] text-muted-foreground">{{ pdps.length }}</span></h2>
-              <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseOwned=!collapseOwned" :title="collapseOwned ? 'Expand' : 'Collapse'" :aria-label="collapseOwned ? 'Expand' : 'Collapse'">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseOwned ? '-rotate-90' : 'rotate-0'">
-                  <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                </svg>
-              </button>
-            </div>
-            <div class="flex items-center gap-2" v-if="activeTab!=='Annex'">
-              <button class="rounded-md bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:opacity-90" @click="openCreatePdp">+ Add PDP</button>
-            </div>
-          </div>
-
-          <div v-if="!collapseOwned">
-            <div v-if="hasPdps" class="space-y-1">
-              <button v-for="p in pdps" :key="p.id" class="w-full rounded-md border px-3 py-2 text-left text-sm hover:bg-muted" :class="selectedPdpId===p.id ? 'border-primary' : 'border-border'" @click="selectPdp(p.id)">
-                <div class="flex items-center justify-between">
-                  <span class="font-medium">{{ p.title }}</span>
-                  <span class="text-xs text-muted-foreground">{{ p.skills_count ?? 0 }} skills</span>
-                </div>
-                <div class="text-xs text-muted-foreground">{{ p.status }} · {{ p.priority }}<span v-if="p.eta"> · ETA: {{ p.eta }}</span></div>
-                <div class="mt-2 flex gap-2">
-                  <button class="rounded border px-2 py-1 text-[11px] hover:bg-muted" @click.stop="openEditPdp(p)">Edit</button>
-                  <button class="rounded border px-2 py-1 text-[11px] text-destructive hover:bg-destructive hover:text-destructive-foreground" @click.stop="deletePdp(p.id)">Delete</button>
-                </div>
-              </button>
-            </div>
-            <p v-else class="text-sm text-muted-foreground">The list is empty. Add the first PDP.</p>
-          </div>
-          <div v-else class="my-2 h-px bg-border"></div>
-
-          <div class="mt-6">
-            <div class="mb-3 flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <h2 class="text-base font-semibold flex items-center gap-2">Shared PDPs <span class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[10px] leading-none min-w-[18px] text-muted-foreground">{{ sharedPdps.length }}</span></h2>
-                <button class="rounded p-1 text-muted-foreground hover:bg-muted transition" @click="collapseShared=!collapseShared" :title="collapseShared ? 'Expand' : 'Collapse'" :aria-label="collapseShared ? 'Expand' : 'Collapse'">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4 transition-transform" :class="collapseShared ? '-rotate-90' : 'rotate-0'">
-                    <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.24 4.5a.75.75 0 01-1.08 0l-4.24-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div v-if="!collapseShared">
-              <div v-if="hasSharedPdps" class="space-y-1">
-                <button v-for="p in sharedPdps" :key="'s-'+p.id" class="w-full rounded-md border px-3 py-2 text-left text-sm hover:bg-muted" :class="selectedPdpId===p.id ? 'border-primary' : 'border-border'" @click="selectPdpFromShared(p.id)">
-                  <div class="flex items-center justify-between">
-                    <span class="font-medium">{{ p.title }}</span>
-                    <span class="text-xs text-muted-foreground">{{ p.skills_count ?? 0 }} skills</span>
-                  </div>
-                  <div class="text-xs text-muted-foreground">{{ p.status }} · {{ p.priority }}<span v-if="p.eta"> · ETA: {{ p.eta }}</span></div>
-                  <div v-if="p.user" class="text-[11px] text-muted-foreground mt-0.5">Owner: {{ p.user.name || p.user.email }}<span v-if="p.user.name"> ({{ p.user.email }})</span></div>
-                </button>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No shared PDPs yet.</p>
-            </div>
-            <div v-else class="my-2 h-px bg-border"></div>
-          </div>
-        </div>
+        <!-- PDP list (top) extracted to component -->
+        <PdpsLists
+          :pdps="pdps"
+          :shared-pdps="sharedPdps"
+          :selected-pdp-id="selectedPdpId"
+          :collapse-owned="collapseOwned"
+          :collapse-shared="collapseShared"
+          :active-tab="activeTab"
+          @update:collapseOwned="val => (collapseOwned = val)"
+          @update:collapseShared="val => (collapseShared = val)"
+          @selectPdp="selectPdp"
+          @selectPdpFromShared="selectPdpFromShared"
+          @openCreatePdp="openCreatePdp"
+          @openEditPdp="openEditPdp"
+          @deletePdp="deletePdp"
+        />
 
         <!-- Tabs: Manage / Annex -->
         <div class="rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border">
@@ -840,180 +785,31 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Manage tab content -->
-          <template v-if="activeTab==='Manage'">
-            <template v-if="selectedPdp">
-              <h3 class="mb-1 text-lg font-semibold">{{ selectedPdp.title }}</h3>
-              <p class="mb-3 text-sm text-muted-foreground">{{ selectedPdp.description }}</p>
-              <p v-if="selectedPdpIsCurator && (selectedPdp as any)?.user" class="-mt-2 mb-3 text-[11px] text-muted-foreground">Owner: {{ (selectedPdp as any).user.name || (selectedPdp as any).user.email }}<span v-if="(selectedPdp as any).user.name"> ({{ (selectedPdp as any).user.email }})</span></p>
+          <ManageTab v-if="activeTab==='Manage'"
+            :selected-pdp="selectedPdp as any"
+            :selected-pdp-is-owner="selectedPdpIsOwner"
+            :selected-pdp-is-curator="selectedPdpIsCurator"
+            :selected-pdp-is-editable="selectedPdpIsEditable"
+            :skills="skills"
+            :curators="curators"
+            :curator-email="curatorEmail"
+            :user-options="userOptions"
+            :show-user-dropdown="showUserDropdown"
+            @openEditPdp="openEditPdp"
+            @openCreateSkill="openCreateSkill"
+            @openEditSkill="openEditSkill"
+            @deleteSkill="deleteSkill"
+            @openProgressModal="openProgressModal"
+            @toggleCriterionDone="toggleCriterionDone"
+            @selectUserOption="selectUserOption"
+            @assignCurator="assignCurator"
+            @shareToUser="shareToUser"
+            @removeCurator="removeCurator"
+            @update:curatorEmail="val => (curatorEmail = val)"
+            @update:showUserDropdown="val => (showUserDropdown = val)"
+          />
 
-              <div v-if="activeTab==='Manage' && selectedPdpIsOwner" class="mb-4" id="pdp-share">
-                <div class="flex items-center gap-2">
-                  <div class="relative" ref="userPickerRef">
-                    <input v-model="curatorEmail" @focus="showUserDropdown = userOptions.length>0" @blur="setTimeout(()=>closeUserDropdown(),100)" @keydown.enter.prevent="closeUserDropdown()" @keydown.esc.prevent="closeUserDropdown()" type="text" placeholder="Enter curator email or name" class="w-64 rounded border px-2 py-1 text-sm" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" name="curatorSearch" inputmode="text" />
-                    <ul v-if="showUserDropdown" class="absolute z-10 mt-1 max-h-56 w-[22rem] overflow-auto rounded-md border bg-background shadow">
-                      <li v-for="u in userOptions" :key="u.id" class="flex cursor-pointer items-center justify-between px-2 py-1 text-sm hover:bg-muted" @mousedown.prevent="selectUserOption(u)">
-                        <span class="font-medium">{{ u.name || u.email }}</span>
-                        <span class="ml-2 text-xs text-muted-foreground" v-if="u.name">{{ u.email }}</span>
-                      </li>
-                      <li v-if="!userOptions.length" class="px-2 py-1 text-xs text-muted-foreground">No matches</li>
-                    </ul>
-                  </div>
-                  <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" @click="assignCurator">Assign curator</button>
-                                    <button class="rounded-md border px-3 py-1.5 text-xs hover:bg-muted inline-flex items-center gap-1" title="Share a copy of this PDP to the selected user" @click="shareToUser">
-                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3.5 w-3.5">
-                                        <path d="M15 8a3 3 0 10-2.83-4H12a3 3 0 102.17 5.03l-6.1 3.05a3 3 0 100 1.84l6.1 3.05A3 3 0 1015 12a3 3 0 00-2.17.97l-6.1-3.05A3 3 0 0012 8h.17A2.99 2.99 0 0015 8z"/>
-                                      </svg>
-                                      <span>Share PDP</span>
-                                    </button>
-                </div>
-                <div v-if="curators.length" class="mt-2 flex flex-wrap gap-2">
-                  <span v-for="c in curators" :key="c.id" class="inline-flex items-center gap-2 rounded-md border px-2 py-0.5 text-xs">
-                    <span class="font-medium">{{ c.name || c.email }}</span>
-                    <span v-if="c.name" class="text-muted-foreground">{{ c.email }}</span>
-                    <button class="ml-1 inline-flex h-5 w-5 items-center justify-center rounded-md border text-[11px] hover:bg-muted" title="Remove curator" @click="removeCurator(c)">×</button>
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="skills.length">
-                <!-- Desktop/tablet: table view -->
-                <div class="hidden lg:block overflow-x-auto">
-                  <table class="min-w-full text-xs sm:text-sm">
-                    <thead class="sticky top-0 z-10 bg-background">
-                      <tr class="border-b text-left text-muted-foreground">
-                        <th class="px-2 py-1 sm:px-3 sm:py-2 sticky left-0 bg-background">Skill to achieve</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2">Description</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2">Win Criteria</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2">Prio</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2">ETA</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2">Status</th>
-                        <th class="px-2 py-1 sm:px-3 sm:py-2"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="s in skills" :key="s.id" class="border-b align-top">
-                        <td class="px-2 py-2 sm:px-3 sm:py-3 font-medium sticky left-0 bg-background">{{ s.skill }}</td>
-                        <td class="px-2 py-2 sm:px-3 sm:py-3 whitespace-pre-line break-words">{{ s.description }}</td>
-                          <td class="px-2 py-2 sm:px-3 sm:py-3">
-                              <div v-if="parseCriteriaItems(s.criteria).length" class="flex flex-col gap-1.5">
-                                  <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="flex items-start gap-1 w-full">
-                                      <button type="button" class="inline-flex flex-1 items-start justify-between rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70 cursor-pointer text-left" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
-                                          <span class="whitespace-normal break-words">{{ c.text }}</span>
-                                          <span v-if="c.comment" class="ml-2 shrink-0 text-muted-foreground">•</span>
-                                      </button>
-                                      <button v-if="selectedPdpIsEditable" type="button" class="inline-flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md border text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
-                                          <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
-                                              <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
-                                          </svg>
-                                          <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3 text-green-600">
-                                              <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.793-6.793a1 1 0 011.414 0z" clip-rule="evenodd" />
-                                          </svg>
-                                      </button>
-                                  </div>
-                              </div>
-                              <span v-else class="text-muted-foreground">—</span>
-                          </td>
-                        <td class="px-2 py-2 sm:px-3 sm:py-3">{{ s.priority }}</td>
-                        <td class="px-2 py-2 sm:px-3 sm:py-3">{{ s.eta }}</td>
-                        <td class="px-2 py-2 sm:px-3 sm:py-3">
-                          <span class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] whitespace-nowrap" :class="statusBadgeClass(s.status)">
-                            {{ s.status }}
-                          </span>
-                        </td>
-                        <td class="px-2 py-2 sm:px-3 sm:py-3 text-right">
-                          <div class="flex justify-end gap-2" v-if="selectedPdpIsEditable">
-                            <button class="rounded border px-2 py-1 text-xs hover:bg-muted" @click="openEditSkill(s)">Edit</button>
-                            <button class="rounded border px-2 py-1 text-xs text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteSkill(s.id)">Delete</button>
-                          </div>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <!-- Mobile: cards view -->
-                <div class="lg:hidden space-y-3">
-                  <article v-for="s in skills" :key="s.id" class="rounded-lg border bg-background p-3 shadow-sm">
-                    <header class="flex items-start justify-between gap-2">
-                      <h4 class="font-semibold text-base leading-snug">{{ s.skill }}</h4>
-                      <span class="inline-flex items-center rounded-md px-2 py-0.5 text-[11px] whitespace-nowrap" :class="statusBadgeClass(s.status)">{{ s.status }}</span>
-                    </header>
-                    <p v-if="s.description" class="mt-1 text-sm text-muted-foreground whitespace-pre-line">{{ s.description }}</p>
-                    <div v-if="parseCriteriaItems(s.criteria).length" class="mt-2 space-y-1.5">
-                      <div class="text-xs text-muted-foreground">Win criteria</div>
-                      <div v-for="(c, i) in parseCriteriaItems(s.criteria)" :key="i" class="flex items-start gap-1 w-full">
-                        <button type="button" class="inline-flex flex-1 items-start justify-between rounded-md border border-border bg-muted px-2 py-1 text-xs hover:bg-muted/70 cursor-pointer text-left" :title="'Click to add/view progress'" @click="openProgressModal(s, i)">
-                          <span class="whitespace-normal break-words">{{ c.text }}</span>
-                          <span v-if="c.comment" class="ml-2 shrink-0 text-muted-foreground">•</span>
-                        </button>
-                        <button v-if="selectedPdpIsEditable" type="button" class="inline-flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md border text-[10px] hover:bg-muted" :title="c.done ? 'Mark as not done' : 'Mark as done'" @click.stop="toggleCriterionDone(s, i, !c.done)">
-                          <svg v-if="!c.done" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3">
-                            <path fill-rule="evenodd" d="M3.5 10a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0zm9.204-2.79a1 1 0 10-1.414-1.414L8.5 8.586 7.21 7.296a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l3.494-3.5z" clip-rule="evenodd" />
-                          </svg>
-                          <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="h-3 w-3 text-green-600">
-                            <path fill-rule="evenodd" d="M16.704 5.29a1 1 0 010 1.414l-7.5 7.5a1 1 0 01-1.414 0l-3-3a1 1 0 111.414-1.414l2.293 2.293 6.793-6.793a1 1 0 011.414 0z" clip-rule="evenodd" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    <footer class="mt-3 flex flex-wrap items-center justify-between gap-2">
-                      <div class="text-xs text-muted-foreground">Prio: <span class="font-medium">{{ s.priority }}</span><span v-if="s.eta"> · ETA: {{ s.eta }}</span></div>
-                      <div class="flex gap-2" v-if="selectedPdpIsEditable">
-                        <button class="rounded border px-2 py-1 text-xs hover:bg-muted" @click="openEditSkill(s)">Edit</button>
-                        <button class="rounded border px-2 py-1 text-xs text-destructive hover:bg-destructive hover:text-destructive-foreground" @click="deleteSkill(s.id)">Delete</button>
-                      </div>
-                    </footer>
-                  </article>
-                </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">No skills in this PDP. Add the first one.</p>
-            </template>
-            <p v-else class="text-sm text-muted-foreground">Select a PDP to view its skills.</p>
-          </template>
-
-          <!-- Annex tab content -->
-          <template v-else>
-            <template v-if="selectedPdp">
-              <h3 class="mb-3 text-lg font-semibold">{{ selectedPdp.title }}</h3>
-              <div v-if="(annex?.skills || []).length" class="grid grid-cols-1 gap-4 md:grid-cols-4">
-                <!-- Sidebar: skills list -->
-                <div class="md:col-span-1 border rounded-md p-2 max-h-[60vh] overflow-auto">
-                  <h3 class="mb-2 text-xs font-semibold text-muted-foreground">Skills</h3>
-                  <ul class="space-y-1 text-sm">
-                    <li v-for="s in (annex?.skills || [])" :key="s.id">
-                      <a class="block rounded px-2 py-1 hover:bg-muted" :href="'#skill-' + s.id">{{ s.skill }}</a>
-                    </li>
-                  </ul>
-                </div>
-                <!-- Document body -->
-                <div class="md:col-span-3 space-y-6">
-                  <div v-for="s in (annex?.skills || [])" :key="s.id" :id="'skill-' + s.id" class="rounded-md border">
-                    <div class="border-b bg-muted/50 px-3 py-2">
-                      <h4 class="font-semibold">{{ s.skill }}</h4>
-                      <div class="text-xs text-muted-foreground">{{ s.description }}</div>
-                    </div>
-                    <div class="p-3 space-y-4">
-                      <template v-for="c in s.criteria" :key="c.index">
-                        <div v-if="c.entries && c.entries.length">
-                          <div class="font-medium">• {{ c.text }}</div>
-                          <div class="mt-1 space-y-2">
-                            <div v-for="e in c.entries" :key="e.id" class="rounded-md bg-muted/40 px-3 py-2 text-sm">
-                              <div class="mb-1 text-[11px] text-muted-foreground">{{ formatKyivDateTime(e.created_at) }}<span v-if="e.user"> · {{ e.user.name }}</span></div>
-                              <div class="whitespace-pre-line">{{ e.note }}</div>
-                            </div>
-                          </div>
-                        </div>
-                      </template>
-                      <div v-if="!(s.criteria || []).some((c:any)=>c.entries && c.entries.length)" class="text-sm text-muted-foreground">No approved entries.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <p v-else class="text-sm text-muted-foreground">There are no skills in the PDP.</p>
-            </template>
-            <p v-else class="text-sm text-muted-foreground">Select a PDP to generate the Annex.</p>
-          </template>
+          <AnnexTab v-else :selected-pdp="selectedPdp as any" :annex="annex" />
         </div>
       </div>
 

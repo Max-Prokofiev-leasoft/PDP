@@ -36,7 +36,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/pdps.shared.json', [PdpController::class, 'shared']);
     Route::get('/pdps/templates.json', [PdpController::class, 'templates']);
     Route::post('/pdps/templates.json', [PdpController::class, 'createTemplate']);
+    Route::get('/pdps/templates/{key}.json', [PdpController::class, 'getTemplate']);
+    Route::put('/pdps/templates/{key}.json', [PdpController::class, 'updateTemplate']);
+    Route::delete('/pdps/templates/{key}.json', [PdpController::class, 'deleteTemplate']);
     Route::post('/pdps/templates/{key}/assign.json', [PdpController::class, 'assignTemplate']);
+    // Assign template skills into an existing PDP (compose PDP from skill templates)
+    Route::post('/pdps/{pdp}/templates/{key}/assign.json', [PdpController::class, 'assignTemplateToPdp']);
+    // Manual sync trigger for templates (owner only)
+    Route::post('/pdps/templates/{key}/sync.json', [PdpController::class, 'syncTemplate']);
     Route::post('/pdps.json', [PdpController::class, 'store']);
     Route::post('/pdps/{pdp}/assign-curator.json', [PdpController::class, 'assignCurator']);
     Route::get('/pdps/{pdp}/curators.json', [PdpController::class, 'curators']);
