@@ -20,6 +20,7 @@ class Pdp extends Model
         'priority',
         'eta',
         'status',
+        'template_id',
     ];
 
     protected $casts = [
@@ -35,6 +36,18 @@ class Pdp extends Model
     public function skills(): HasMany
     {
         return $this->hasMany(PdpSkill::class)->orderBy('order_column');
+    }
+
+    public function template(): BelongsTo
+    {
+        return $this->belongsTo(PdpTemplate::class, 'template_id');
+    }
+
+    public function isFinalized(): bool
+    {
+        // Consider PDP finalized when status is 'Done'.
+        // Can be extended to include other statuses if business rules change.
+        return $this->status === 'Done';
     }
 
     public function curators(): BelongsToMany

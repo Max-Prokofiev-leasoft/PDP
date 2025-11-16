@@ -1,5 +1,5 @@
 # ===== Base =====
-FROM php:8.2-fpm AS base
+FROM --platform=linux/amd64 php:8.2-fpm AS base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git unzip curl ca-certificates libzip-dev libpng-dev libonig-dev libxml2-dev \

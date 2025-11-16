@@ -37,6 +37,25 @@ class PdpSkillService
 
     public function updateSkill(PdpSkill $skill, array $data): PdpSkill
     {
+        // Manual override rules:
+        // Mark as overridden ONLY when user changes structural/template fields
+        // (skill name, description, or criteria text). Changing status/priority/eta/order
+        // should NOT block future template syncs.
+        if (!empty($skill->template_skill_key)) {
+            $shouldOverride = false;
+            foreach (['skill','description','criteria'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $newVal = $data[$field];
+                    if ($skill->$field !== $newVal) {
+                        $shouldOverride = true;
+                        break;
+                    }
+                }
+            }
+            if ($shouldOverride) {
+                $data['is_manual_override'] = true;
+            }
+        }
         return $this->skillRepo->update($skill, $data);
     }
 
@@ -51,6 +70,8 @@ class PdpSkillService
         $this->assertIndex($index, $items);
         $items[$index]['comment'] = ($comment !== null && $comment !== '') ? $comment : null;
         $skill->criteria = json_encode($items, JSON_UNESCAPED_UNICODE);
+        // Editing a criterion comment is considered progress, not a structural change,
+        // therefore do NOT mark as manual override.
         $skill->save();
         return $skill->refresh();
     }
@@ -71,6 +92,7 @@ class PdpSkillService
         }
 
         $skill->criteria = json_encode($items, JSON_UNESCAPED_UNICODE);
+        // Toggling done is progress, not a structural change → do NOT set manual override.
         $skill->save();
         return $skill->refresh();
     }
